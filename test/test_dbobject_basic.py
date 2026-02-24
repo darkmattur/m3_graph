@@ -13,7 +13,6 @@ from pydantic import ValidationError
 from decimal import Decimal
 
 
-@pytest.mark.asyncio
 class TestDBObjectBasics:
     """Test basic DBObject creation and attributes."""
 
