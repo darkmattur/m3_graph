@@ -3,7 +3,7 @@ when:
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_DB: m3_test
       POSTGRES_USER: m3
