@@ -10,6 +10,7 @@ Tests cover:
 - Consistency across operations
 """
 import pytest
+from m3_graph.link import Link
 
 
 @pytest.mark.asyncio
@@ -648,3 +649,323 @@ class TestConcurrentModifications:
         reloaded = graph.registry[asset.id]
         assert reloaded.price == 200.0
         assert reloaded.volume == 2000.0
+
+
+@pytest.mark.asyncio
+class TestConcurrentModificationDetection:
+    """Test detection and handling of concurrent modifications."""
+
+    async def test_concurrent_update_last_write_wins(self, graph):
+        """Test that concurrent updates follow last-write-wins semantics."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+
+        asset = Asset(source="test", symbol="BTC", price=100.0)
+        await asset.insert()
+        asset_id = asset.id
+
+        # Simulate two concurrent sessions
+        # Session 1: Load object
+        session1_asset = asset
+
+        # Session 2: Load same object (simulate by reloading)
+        graph.registry.clear()
+        await graph.load()
+        session2_asset = graph.registry[asset_id]
+
+        # Session 1 modifies and saves
+        session1_asset.price = 200.0
+        await session1_asset.update()
+
+        # Session 2 also modifies and saves (unaware of session 1's change)
+        session2_asset.price = 300.0
+        await session2_asset.update()
+
+        # Last write (session 2) should win
+        graph.registry.clear()
+        await graph.load()
+        final = graph.registry[asset_id]
+        assert final.price == 300.0  # Session 2's value
+
+    async def test_stale_read_detection_not_implemented(self, graph):
+        """Document that stale read detection is not currently implemented."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+
+        asset = Asset(source="test", symbol="BTC", price=100.0)
+        await asset.insert()
+        asset_id = asset.id
+
+        # Hold reference to original object
+        original = asset
+
+        # External modification
+        await graph._conn.execute(
+            f"UPDATE {graph._name}.object SET attr = jsonb_set(attr, '{{price}}', '500.0') WHERE id = %(id)s",
+            id=asset_id
+        )
+
+        # Original object can still update with stale data (no version check)
+        original.price = 150.0
+        await original.update()  # Succeeds, overwrites external change
+
+        # Verify last write won
+        graph.registry.clear()
+        await graph.load()
+        reloaded = graph.registry[asset_id]
+        assert reloaded.price == 150.0
+
+    async def test_concurrent_delete_and_update(self, graph):
+        """Test updating object that was deleted by another session."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+
+        asset = Asset(source="test", symbol="BTC", price=100.0)
+        await asset.insert()
+        asset_id = asset.id
+
+        # Session 1: Hold reference
+        session1_asset = asset
+
+        # Session 2: Delete the object (simulate by direct DB delete)
+        await graph._conn.execute(
+            f"DELETE FROM {graph._name}.object WHERE id = %(id)s",
+            id=asset_id
+        )
+
+        # Session 1: Try to update (object doesn't exist anymore)
+        session1_asset.price = 200.0
+        await session1_asset.update()  # Silently succeeds but updates 0 rows
+
+        # Verify object is still deleted
+        graph.registry.clear()
+        await graph.load()
+        assert asset_id not in graph.registry
+
+    async def test_concurrent_relationship_changes(self, graph):
+        """Test concurrent modifications to relationships."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author]
+
+        author1 = Author(source="test", name="Author 1")
+        author2 = Author(source="test", name="Author 2")
+        author3 = Author(source="test", name="Author 3")
+        await author1.insert()
+        await author2.insert()
+        await author3.insert()
+
+        book = Book(source="test", title="Book", author=author1)
+        await book.insert()
+        book_id = book.id
+
+        # Session 1: Hold reference
+        session1_book = book
+
+        # Session 2: Change author
+        graph.registry.clear()
+        await graph.load()
+        session2_book = graph.registry[book_id]
+        session2_book.author = graph.registry[author2.id]
+        await session2_book.update()
+
+        # Session 1: Change author (unaware of session 2's change)
+        session1_book.author = author3
+        await session1_book.update()
+
+        # Last write wins
+        graph.registry.clear()
+        await graph.load()
+        final = graph.registry[book_id]
+        assert final.author_id == author3.id
+
+    async def test_interleaved_modifications(self, graph):
+        """Test interleaved updates to different fields."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+            volume: float
+            name: str
+
+        asset = Asset(source="test", symbol="BTC", price=100.0, volume=1000.0, name="Bitcoin")
+        await asset.insert()
+        asset_id = asset.id
+
+        # Session 1: Load and modify price
+        session1 = asset
+        session1.price = 200.0
+
+        # Session 2: Load and modify volume
+        graph.registry.clear()
+        await graph.load()
+        session2 = graph.registry[asset_id]
+        session2.volume = 2000.0
+
+        # Session 2 saves first
+        await session2.update()
+
+        # Session 1 saves (will overwrite session 2's volume change)
+        await session1.update()
+
+        # Session 1's entire state overwrites, losing session 2's volume change
+        graph.registry.clear()
+        await graph.load()
+        final = graph.registry[asset_id]
+        assert final.price == 200.0  # Session 1's change
+        assert final.volume == 1000.0  # Session 2's change was lost!
+
+    async def test_registry_state_vs_database_state(self, graph):
+        """Test that registry can become out of sync with database."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+
+        asset = Asset(source="test", symbol="BTC", price=100.0)
+        await asset.insert()
+        asset_id = asset.id
+
+        # Keep reference to in-memory object
+        in_memory = asset
+
+        # Modify database directly
+        await graph._conn.execute(
+            f"UPDATE {graph._name}.object SET attr = jsonb_set(attr, '{{price}}', '500.0') WHERE id = %(id)s",
+            id=asset_id
+        )
+
+        # Registry still has old value
+        assert in_memory.price == 100.0
+        assert graph.registry[asset_id].price == 100.0
+
+        # Database has new value (can verify by fresh load)
+        graph.registry.clear()
+        await graph.load()
+        fresh = graph.registry[asset_id]
+        assert fresh.price == 500.0
+
+
+@pytest.mark.asyncio
+class TestReloadPatterns:
+    """Test various reload patterns and their effects."""
+
+    async def test_selective_reload_not_supported(self, graph):
+        """Document that selective object reload is not supported."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+
+        asset1 = Asset(source="test", symbol="BTC", price=100.0)
+        asset2 = Asset(source="test", symbol="ETH", price=50.0)
+        await asset1.insert()
+        await asset2.insert()
+
+        # Modify asset1 in database
+        await graph._conn.execute(
+            f"UPDATE {graph._name}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(id)s",
+            id=asset1.id
+        )
+
+        # No way to reload just asset1 - must reload all or nothing
+        # This documents the limitation
+        assert asset1.price == 100.0  # Still stale
+
+        # Only option is full reload
+        graph.registry.clear()
+        await graph.load()
+        assert graph.registry[asset1.id].price == 200.0
+
+    async def test_partial_registry_clear(self, graph):
+        """Test that you can manually remove objects from registry."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+
+        asset1 = Asset(source="test", symbol="BTC")
+        asset2 = Asset(source="test", symbol="ETH")
+        await asset1.insert()
+        await asset2.insert()
+
+        id1 = asset1.id
+        id2 = asset2.id
+
+        # Manually remove one object
+        graph.registry.pop(id1)
+
+        # Other object still there
+        assert id1 not in graph.registry
+        assert id2 in graph.registry
+
+        # But this creates inconsistent state - type registry still has it
+        assert id1 in graph.registry_type["asset"]
+
+    async def test_reload_after_mass_delete(self, graph):
+        """Test reloading after many objects are deleted."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+
+        assets = [Asset(source="test", symbol=f"COIN{i}") for i in range(10)]
+        for a in assets:
+            await a.insert()
+
+        # Delete half of them
+        for i in range(5):
+            await assets[i].delete()
+
+        # Reload
+        graph.registry.clear()
+        await graph.load()
+
+        # Only 5 should remain
+        assert len([a for a in graph.registry.values() if isinstance(a, Asset)]) == 5
+
+    async def test_reload_with_pending_changes(self, graph):
+        """Test that reload discards all pending changes."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+            volume: float
+
+        asset = Asset(source="test", symbol="BTC", price=100.0, volume=1000.0)
+        await asset.insert()
+        asset_id = asset.id
+
+        # Make multiple pending changes
+        asset.price = 200.0
+        asset.volume = 2000.0
+        asset.symbol = "BITCOIN"
+
+        # Reload without saving
+        graph.registry.clear()
+        await graph.load()
+
+        reloaded = graph.registry[asset_id]
+        assert reloaded.price == 100.0
+        assert reloaded.volume == 1000.0
+        assert reloaded.symbol == "BTC"

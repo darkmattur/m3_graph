@@ -37,4 +37,4 @@ version = {file = ["VERSION"]}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"m3_common" = ["**/*"]
+"m3_graph" = ["**/*"]

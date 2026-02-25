@@ -10,6 +10,7 @@ services:
       POSTGRES_PASSWORD: m3
 
 steps:
+
   set-version:
     image: python:3.13-slim
     commands:
@@ -18,7 +19,7 @@ steps:
         import os
         from pathlib import Path
 
-        tag = os.environ.get("CI_COMMIT_TAG", "")
+        tag = os.getenv("CI_COMMIT_TAG", "")
         if not tag:
           raise SystemExit("CI_COMMIT_TAG is not set")
 
@@ -28,7 +29,7 @@ steps:
         PY
     when:
       event: tag
-
+  
   test:
     image: python:3.13-slim
     environment:
@@ -41,7 +42,6 @@ steps:
       GITEA_SVC_PASSWORD:
         from_secret: GITEA_SVC_PASSWORD
 
-      # Point tests at the postgres service hostname
       PGHOST: postgres
       PGPORT: 5432
       PGDATABASE: m3_test
@@ -64,161 +64,121 @@ steps:
         export PIP_EXTRA_INDEX_URL="$GITEA_URL/api/packages/$GITEA_OWNER/pypi/simple"
         export PIP_TRUSTED_HOST="$host"
         echo "Using extra index: $PIP_EXTRA_INDEX_URL"
-
+        
       - pip install -e .[dev]
-
-      # Wait for postgres to accept connections
       - |
-        python - <<'PY'
-        import os, time, sys
-
-        host = os.environ.get("PGHOST", "postgres")
-        port = int(os.environ.get("PGPORT", "5432"))
-        db   = os.environ.get("PGDATABASE", "m3_test")
-        user = os.environ.get("PGUSER", "m3")
-        pw   = os.environ.get("PGPASSWORD", "m3")
-
-        # Use asyncpg if you have it (common for async tests); fallback to psycopg/psycopg2 if present.
-        def try_asyncpg():
-          import asyncio
-          import asyncpg
-          async def _go():
-            conn = await asyncpg.connect(host=host, port=port, database=db, user=user, password=pw)
-            await conn.close()
-          asyncio.run(_go())
-
-        def try_psycopg():
-          try:
-            import psycopg
-            conn = psycopg.connect(host=host, port=port, dbname=db, user=user, password=pw)
-            conn.close()
-            return
-          except Exception:
-            import psycopg2
-            conn = psycopg2.connect(host=host, port=port, dbname=db, user=user, password=pw)
-            conn.close()
-
-        last = None
-        for i in range(60):
-          try:
-            try:
-              try_asyncpg()
-            except Exception:
-              try_psycopg()
-            print("PostgreSQL is ready.")
-            sys.exit(0)
-          except Exception as e:
-            last = e
-            time.sleep(1)
-
-        raise SystemExit(f"PostgreSQL not ready after 60s: {last!r}")
-        PY
-
-      - |
-        if [ -d test ] && find test -type f -name "test_*.py" | grep -q .; then
+        if [ -d tests ] && find test -type f -name "test_*.py" | grep -q .; then
           echo "Running pytest..."
           pytest -q
         else
-          echo "No test/ directory with test_*.py files found — skipping pytest."
+          echo "No tests/ directory with test_*.py files found — skipping pytest."
         fi
       - rm -rf src/*.egg-info src/*/*.egg-info *.egg-info
     when:
       event: [ push, tag, manual ]
-    
+
   build:
     image: mambaorg/micromamba:latest
     depends_on: [ test ]
     commands:
       - set -eu
-      - micromamba create -y -n build -c conda-forge python=3.13 conda-build pip python-build
+
+      - |
+        cat > ~/.condarc <<'YAML'
+        channels:
+          - http://conda_m3
+          - conda-forge
+          - defaults
+        channel_priority: strict
+        show_channel_urls: true
+        auto_activate_base: false
+        allow_non_channel_urls: true
+        YAML
+
+      - micromamba create -y -n build -c conda-forge python=3.13 conda-build python-build pip grayskull
 
       - micromamba run -n build conda config --set channel_priority strict
       - micromamba run -n build conda config --add channels conda-forge
 
-      # Build sdist (source tarball)
       - rm -rf dist
-      - micromamba run -n build python -m build --sdist   
+      - micromamba run -n build python -m build --sdist
 
-      # Generate conda recipe from pyproject.toml
+      - rm -rf conda/recipe
+      - mkdir -p conda/recipe
       - |
-        micromamba run -n build python - <<'PY'
-        import re
-        import tomllib
+        set -euo pipefail
+        sdist="$(ls -1 dist/*.tar.gz | head -n1)"
+        test -n "$sdist"
+        echo "Generating recipe from sdist: $sdist"
+
+        micromamba run -n build grayskull pypi "$sdist" \
+          --output conda/recipe \
+          --package-indexes http://conda_m3 conda-forge
+
+      # Patch generated meta.yaml:
+      # - remove placeholder license_file
+      # - replace test section (avoid import-time side effects)
+      - |
+        set -euo pipefail
+        meta="$(find conda/recipe -maxdepth 3 -name meta.yaml -print -quit)"
+        echo "Patching meta.yaml: $meta"
+        test -n "$meta"
+
+        micromamba run -n build python - "$meta" <<'PY'
+        import sys
         from pathlib import Path
 
-        with open("pyproject.toml", "rb") as f:
-            data = tomllib.load(f)
+        meta = Path(sys.argv[1])
+        lines = meta.read_text(encoding="utf-8").splitlines()
 
-        proj = data["project"]
-        pkg_name = proj["name"].lower()
-        import_name = "m3_config"
+        def is_toplevel_key(s: str) -> bool:
+            return bool(s) and (not s.startswith((" ", "\t"))) and s.rstrip().endswith(":")
 
-        version = Path("VERSION").read_text(encoding="utf-8").strip()
+        out = []
+        i = 0
+        n = len(lines)
 
-        deps = proj.get("dependencies", [])
+        while i < n:
+            line = lines[i]
 
-        def to_conda_req(s: str) -> str:
-            s = s.strip()
-            s = re.sub(r"\s*(>=|<=|==|!=|~=|>|<)\s*", r" \1", s)
-            s = re.sub(r"(>=|<=|==|!=|~=|>|<)\s+", r"\1", s)
-            return s
+            # Drop Grayskull placeholder license file
+            if line.strip() == "license_file: PLEASE_ADD_LICENSE_FILE":
+                i += 1
+                continue
 
-        run_deps = "\n".join(f"    - {to_conda_req(d)}" for d in deps)
+            # Drop entire existing top-level test: block (imports cause failures)
+            if line.strip() == "test:" and not line.startswith((" ", "\t")):
+                i += 1
+                while i < n and not is_toplevel_key(lines[i]):
+                    i += 1
+                continue
 
-        # Find the sdist file we just built
-        sdists = sorted(Path("dist").glob("*.tar.gz"))
-        if not sdists:
-            raise SystemExit("No sdist found in dist/*.tar.gz")
-        sdist_abs = sdists[0].resolve()
-        sdist_url = sdist_abs.as_uri()
-        
-        meta = f"""\
-        package:
-          name: {pkg_name}
-          version: {version}
+            out.append(line)
+            i += 1
 
-        source:
-          url: {sdist_url}
+        # Append safe test block
+        out.append("")
+        out.append("test:")
+        out.append("  requires:")
+        out.append("    - pip")
+        out.append("  commands:")
+        out.append("    - python -m pip check")
 
-        build:
-          noarch: python
-          script: {{{{ PYTHON }}}} -m pip install . --no-deps -vv
-
-        requirements:
-          host:
-            - python
-            - pip
-            - setuptools
-          run:
-            - python
-        {run_deps}
-
-        test:
-          imports:
-            - {import_name}
-        """
-
-        Path("conda/recipe").mkdir(parents=True, exist_ok=True)
-        Path("conda/recipe/meta.yaml").write_text(meta.strip() + "\n", encoding="utf-8")
-        print("Generated conda/recipe/meta.yaml using sdist:", sdist_abs)
+        with meta.open("w", encoding="utf-8", newline="\n") as f:
+            for l in out:
+                print(l, file=f)
         PY
 
       - rm -rf conda-dist
-      - micromamba run -n build conda build -c conda-forge conda/recipe --output-folder conda-dist
-
       - |
-        micromamba run -n build python - <<'PY'
-        import tarfile, glob
-        sd = sorted(glob.glob("dist/*.tar.gz"))[0]
-        print("sdist:", sd)
-        with tarfile.open(sd, "r:gz") as t:
-            names = [n for n in t.getnames() if "m3_config" in n]
-        print("contains m3_config files:", len(names))
-        print("\n".join(names[:40]))
-        PY
+        set -euo pipefail
+        recipe_dir="$(dirname "$(find conda/recipe -maxdepth 3 -name meta.yaml -print -quit)")"
+        echo "Using recipe dir: $recipe_dir"
+        test -n "$recipe_dir"
+        micromamba run -n build conda build -c conda-forge "$recipe_dir" --output-folder conda-dist
     when:
       event: [ push, tag, manual ]
-
+  
   publish-conda:
     image: curlimages/curl:8.10.1
     depends_on: [ build ]

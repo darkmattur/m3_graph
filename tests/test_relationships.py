@@ -11,6 +11,10 @@ Tests cover:
 """
 import pytest
 from m3_graph.link import Link, Backlink
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from typing import ForwardRef
 
 
 @pytest.mark.asyncio
@@ -818,3 +822,415 @@ class TestComplexRelationships:
         assert book_s5.author_id == author2.id
         assert len(author1_s5.books) == 0
         assert len(author2_s5.books) == 1
+
+
+@pytest.mark.asyncio
+class TestRelationshipTypeValidation:
+    """Test type safety in relationship assignments."""
+
+    async def test_assigning_wrong_type_to_link(self, graph):
+        """Test that assigning wrong DBObject type to a Link should work but may cause issues."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author]
+
+        class Publisher(graph.DBObject):
+            category = "test"
+            type = "publisher"
+            name: str
+
+        author = Author(source="test", name="Jane Doe")
+        publisher = Publisher(source="test", name="Big Publisher")
+        await author.insert()
+        await publisher.insert()
+
+        # Current implementation allows assigning any DBObject
+        # This documents current behavior (not necessarily desired)
+        book = Book(source="test", title="Book", author=author)
+        await book.insert()
+
+        # This will work but is semantically wrong
+        book.author = publisher
+        assert book.author_id == publisher.id
+
+    async def test_link_accepts_int_id(self, graph):
+        """Test that Link setter accepts raw integer IDs."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author]
+
+        author = Author(source="test", name="Jane Doe")
+        await author.insert()
+
+        book = Book(source="test", title="Book", author=author)
+        await book.insert()
+
+        # Assign via raw ID
+        book.author = author.id
+        assert book.author_id == author.id
+
+    async def test_link_rejects_invalid_types(self, graph):
+        """Test that Link setter rejects invalid value types."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author]
+
+        author = Author(source="test", name="Jane Doe")
+        await author.insert()
+
+        book = Book(source="test", title="Book", author=author)
+
+        # Should reject string
+        with pytest.raises(ValueError):
+            book.author = "not_valid"
+
+        # Should reject dict
+        with pytest.raises((ValueError, TypeError)):
+            book.author = {"id": author.id}
+
+
+@pytest.mark.asyncio
+class TestCascadeDelete:
+    """Test cascade delete scenarios and orphaned references."""
+
+    async def test_delete_object_with_required_backlinks(self, graph):
+        """Test deleting an object that is referenced by required Links."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author]  # Required link
+
+        author = Author(source="test", name="Jane Doe")
+        await author.insert()
+
+        book = Book(source="test", title="Book", author=author)
+        await book.insert()
+
+        # Save author ID before deleting
+        author_id = author.id
+
+        # Delete author (book still references it)
+        await author.delete()
+
+        # Book should still exist with orphaned reference
+        graph.registry.clear()
+        await graph.load()
+
+        book_reloaded = graph.registry.get(book.id)
+        assert book_reloaded is not None
+        assert book_reloaded.author_id == author_id  # Orphaned ID
+        assert book_reloaded.author is None  # Can't resolve
+
+    async def test_delete_object_with_nullable_backlinks(self, graph):
+        """Test deleting an object referenced by nullable Links."""
+        class Category(graph.DBObject):
+            category = "test"
+            type = "category"
+            name: str
+
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+            category_obj: Link[Category] | None = None
+
+        cat = Category(source="test", name="Electronics")
+        await cat.insert()
+
+        item = Item(source="test", name="Laptop", category_obj=cat)
+        await item.insert()
+
+        # Save category ID before deleting
+        cat_id = cat.id
+
+        # Delete category
+        await cat.delete()
+
+        # Item should have orphaned reference
+        graph.registry.clear()
+        await graph.load()
+
+        item_reloaded = graph.registry[item.id]
+        assert item_reloaded.category_obj_id == cat_id
+        assert item_reloaded.category_obj is None
+
+    async def test_delete_with_multiple_references(self, graph):
+        """Test deleting object referenced by multiple other objects."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author]
+
+        author = Author(source="test", name="Jane Doe")
+        await author.insert()
+
+        books = [
+            Book(source="test", title=f"Book {i}", author=author)
+            for i in range(5)
+        ]
+        for book in books:
+            await book.insert()
+
+        # Delete author (5 books reference it)
+        author_id = author.id
+        await author.delete()
+
+        # All books should have orphaned references
+        graph.registry.clear()
+        await graph.load()
+
+        for book in books:
+            book_reloaded = graph.registry[book.id]
+            assert book_reloaded.author_id == author_id
+            assert book_reloaded.author is None
+
+    async def test_delete_triggers_backlink_cleanup(self, graph):
+        """Test that database triggers clean up backlinks on delete."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+            books: Backlink['Book']
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author, "books"]
+
+        await graph.db_maintain()
+
+        author = Author(source="test", name="Jane Doe")
+        await author.insert()
+
+        book = Book(source="test", title="Book", author=author)
+        await book.insert()
+
+        # Delete book
+        await book.delete()
+
+        # Reload author to see updated backlinks
+        graph.registry.clear()
+        await graph.load()
+
+        author_reloaded = graph.registry[author.id]
+        assert len(author_reloaded.books) == 0
+
+
+@pytest.mark.asyncio
+class TestCircularRelationships:
+    """Test circular and self-referential relationships.
+
+    NOTE: Self-referential types (Link['ClassName']) are not currently supported
+    by the ORM due to JSON serialization issues and forward reference handling.
+    These tests are commented out to document the limitation.
+    """
+
+    async def test_self_referential_limitation_documented(self, graph):
+        """Document that self-referential Links are not currently supported."""
+        # Self-referential types like Link['Node'] cause issues:
+        # 1. Type annotation processing fails in __init_subclass__
+        # 2. JSON serialization fails when circular references exist
+        # 3. Forward references aren't resolved properly
+
+        # This is a known limitation - self-referential relationships
+        # would require:
+        # - Proper forward reference resolution in Link type processing
+        # - JSON serialization that handles circular references
+        # - Database schema that prevents infinite recursion
+        pass
+
+
+@pytest.mark.asyncio
+class TestComplexRelationshipPatterns:
+    """Test complex multi-object relationship patterns."""
+
+    async def test_many_to_many_via_junction(self, graph):
+        """Test many-to-many relationships using junction table pattern."""
+        class Student(graph.DBObject):
+            category = "test"
+            type = "student"
+            name: str
+
+        class Course(graph.DBObject):
+            category = "test"
+            type = "course"
+            title: str
+
+        class Enrollment(graph.DBObject):
+            category = "test"
+            type = "enrollment"
+            student: Link[Student]
+            course: Link[Course]
+
+        student1 = Student(source="test", name="Alice")
+        student2 = Student(source="test", name="Bob")
+        await student1.insert()
+        await student2.insert()
+
+        course1 = Course(source="test", title="Math")
+        course2 = Course(source="test", title="Physics")
+        await course1.insert()
+        await course2.insert()
+
+        # Create many-to-many relationships
+        enrollments = [
+            Enrollment(source="test", student=student1, course=course1),
+            Enrollment(source="test", student=student1, course=course2),
+            Enrollment(source="test", student=student2, course=course1),
+        ]
+        for e in enrollments:
+            await e.insert()
+
+        # Verify relationships
+        graph.registry.clear()
+        await graph.load()
+
+        # Find courses for student1
+        student1_courses = [
+            e.course.title for e in graph.registry_type["enrollment"].values()
+            if e.student_id == student1.id
+        ]
+        assert set(student1_courses) == {"Math", "Physics"}
+
+    async def test_polymorphic_relationships(self, graph):
+        """Test relationships with inheritance hierarchy."""
+        class Content(graph.DBObject):
+            category = "test"
+            type = "content"
+            title: str
+
+        class Article(Content):
+            type = "article"
+            body: str
+
+        class Video(Content):
+            type = "video"
+            duration: int
+
+        class Comment(graph.DBObject):
+            category = "test"
+            type = "comment"
+            text: str
+            content_id: int  # Manual polymorphic reference
+
+        article = Article(source="test", title="My Article", body="Content")
+        video = Video(source="test", title="My Video", duration=120)
+        await article.insert()
+        await video.insert()
+
+        comment1 = Comment(source="test", text="Great article!", content_id=article.id)
+        comment2 = Comment(source="test", text="Nice video!", content_id=video.id)
+        await comment1.insert()
+        await comment2.insert()
+
+        # Verify polymorphic references work
+        assert comment1.content_id == article.id
+        assert comment2.content_id == video.id
+
+    async def test_multiple_links_to_same_type(self, graph):
+        """Test object with multiple relationships to the same type."""
+        class Person(graph.DBObject):
+            category = "test"
+            type = "person"
+            name: str
+
+        class Marriage(graph.DBObject):
+            category = "test"
+            type = "marriage"
+            spouse1: Link[Person]
+            spouse2: Link[Person]
+            date: str
+
+        alice = Person(source="test", name="Alice")
+        bob = Person(source="test", name="Bob")
+        await alice.insert()
+        await bob.insert()
+
+        marriage = Marriage(
+            source="test",
+            spouse1=alice,
+            spouse2=bob,
+            date="2024-01-01"
+        )
+        await marriage.insert()
+
+        # Verify both links work
+        assert marriage.spouse1.name == "Alice"
+        assert marriage.spouse2.name == "Bob"
+        assert marriage.spouse1 is not marriage.spouse2
+
+    async def test_deep_relationship_chain(self, graph):
+        """Test traversing deep relationship chains."""
+        class Country(graph.DBObject):
+            category = "test"
+            type = "country"
+            name: str
+
+        class State(graph.DBObject):
+            category = "test"
+            type = "state"
+            name: str
+            country: Link[Country]
+
+        class City(graph.DBObject):
+            category = "test"
+            type = "city"
+            name: str
+            state: Link[State]
+
+        class Street(graph.DBObject):
+            category = "test"
+            type = "street"
+            name: str
+            city: Link[City]
+
+        country = Country(source="test", name="USA")
+        await country.insert()
+
+        state = State(source="test", name="California", country=country)
+        await state.insert()
+
+        city = City(source="test", name="Los Angeles", state=state)
+        await city.insert()
+
+        street = Street(source="test", name="Main St", city=city)
+        await street.insert()
+
+        # Traverse deep chain
+        assert street.city.name == "Los Angeles"
+        assert street.city.state.name == "California"
+        assert street.city.state.country.name == "USA"

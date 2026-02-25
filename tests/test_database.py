@@ -560,3 +560,369 @@ class TestDatabaseIntegrity:
 
         # Should not be in registry
         assert asset_id not in graph.registry
+
+
+@pytest.mark.asyncio
+class TestDataIntegrity:
+    """Test data integrity constraints and edge cases."""
+
+    async def test_none_vs_missing_field_in_jsonb(self, graph):
+        """Test difference between field=None and field not present in JSONB."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+            description: str | None = None
+
+        # Create with None description
+        item1 = Item(source="test", name="Item1", description=None)
+        await item1.insert()
+
+        # Create without specifying description
+        item2 = Item(source="test", name="Item2")
+        await item2.insert()
+
+        # Check database representation
+        rows = await graph._conn.query(
+            f"SELECT id, attr FROM {graph._name}.object WHERE id IN (%(id1)s, %(id2)s) ORDER BY id",
+            id1=item1.id,
+            id2=item2.id
+        )
+
+        # Both should have the same representation (None fields excluded from JSONB)
+        assert 'description' not in rows[0]['attr']
+        assert 'description' not in rows[1]['attr']
+
+    async def test_update_field_to_none_removes_from_jsonb(self, graph):
+        """Test that updating a field to None removes it from JSONB."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+            description: str | None = None
+
+        item = Item(source="test", name="Item", description="Has description")
+        await item.insert()
+
+        # Verify description is in JSONB
+        row = await graph._conn.query(
+            f"SELECT attr FROM {graph._name}.object WHERE id = %(id)s",
+            id=item.id
+        )
+        assert 'description' in row[0]['attr']
+
+        # Update to None
+        item.description = None
+        await item.update()
+
+        # Should be removed from JSONB
+        row = await graph._conn.query(
+            f"SELECT attr FROM {graph._name}.object WHERE id = %(id)s",
+            id=item.id
+        )
+        assert 'description' not in row[0]['attr']
+
+    async def test_relationship_id_persists_as_none(self, graph):
+        """Test that nullable relationship IDs are stored as None in JSONB."""
+        class Category(graph.DBObject):
+            category = "test"
+            type = "category"
+            name: str
+
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+            category_obj: Link[Category] | None = None
+
+        item = Item(source="test", name="Item")
+        await item.insert()
+
+        # Check JSONB - category_obj_id should be present with null value
+        row = await graph._conn.query(
+            f"SELECT attr FROM {graph._name}.object WHERE id = %(id)s",
+            id=item.id
+        )
+        # According to _get_attr, None values are filtered out unless it's a _id field
+        assert 'category_obj_id' in row[0]['attr']
+        assert row[0]['attr']['category_obj_id'] is None
+
+    async def test_excluded_attrs_not_in_database(self, graph):
+        """Test that excluded attributes are never stored in database."""
+        class Cache(graph.DBObject):
+            category = "test"
+            type = "cache"
+            key: str
+            value: str
+            _cached_at: str = "temp"
+            excluded_attrs = {"_cached_at"}
+
+        cache = Cache(source="test", key="key1", value="value1", _cached_at="2024-01-01")
+        await cache.insert()
+
+        # Verify excluded attr not in database
+        row = await graph._conn.query(
+            f"SELECT attr FROM {graph._name}.object WHERE id = %(id)s",
+            id=cache.id
+        )
+        assert '_cached_at' not in row[0]['attr']
+        assert 'key' in row[0]['attr']
+        assert 'value' in row[0]['attr']
+
+    async def test_decimal_precision_preserved(self, graph):
+        """Test that Decimal precision is preserved through database round-trip."""
+        from decimal import Decimal
+
+        class Account(graph.DBObject):
+            category = "financial"
+            type = "account"
+            balance: Decimal
+
+        # Test various decimal precisions
+        test_values = [
+            Decimal("123.45"),
+            Decimal("0.001"),
+            Decimal("999999999.999999999"),
+            Decimal("0.00000001"),
+        ]
+
+        accounts = []
+        for val in test_values:
+            acc = Account(source="test", balance=val)
+            await acc.insert()
+            accounts.append((acc.id, val))
+
+        # Reload and verify
+        graph.registry.clear()
+        await graph.load()
+
+        for acc_id, expected_val in accounts:
+            acc = graph.registry[acc_id]
+            assert acc.balance == expected_val
+            assert isinstance(acc.balance, Decimal)
+
+    async def test_list_and_dict_deep_equality(self, graph):
+        """Test that complex nested structures are preserved."""
+        class Config(graph.DBObject):
+            category = "test"
+            type = "config"
+            settings: dict
+            tags: list
+
+        complex_dict = {
+            "nested": {
+                "level2": {
+                    "level3": ["a", "b", "c"]
+                }
+            },
+            "numbers": [1, 2, 3]
+        }
+
+        complex_list = [
+            {"id": 1, "name": "first"},
+            {"id": 2, "name": "second", "sub": [1, 2, 3]}
+        ]
+
+        config = Config(source="test", settings=complex_dict, tags=complex_list)
+        await config.insert()
+
+        # Reload and verify deep equality
+        graph.registry.clear()
+        await graph.load()
+
+        reloaded = graph.registry[config.id]
+        assert reloaded.settings == complex_dict
+        assert reloaded.tags == complex_list
+
+    async def test_empty_collections_preserved(self, graph):
+        """Test that empty lists and dicts are preserved."""
+        class Container(graph.DBObject):
+            category = "test"
+            type = "container"
+            items: list
+            metadata: dict
+
+        container = Container(source="test", items=[], metadata={})
+        await container.insert()
+
+        # Verify in database
+        row = await graph._conn.query(
+            f"SELECT attr FROM {graph._name}.object WHERE id = %(id)s",
+            id=container.id
+        )
+        assert row[0]['attr']['items'] == []
+        assert row[0]['attr']['metadata'] == {}
+
+        # Reload and verify
+        graph.registry.clear()
+        await graph.load()
+
+        reloaded = graph.registry[container.id]
+        assert reloaded.items == []
+        assert reloaded.metadata == {}
+
+    async def test_attribute_with_underscore_prefix(self, graph):
+        """Test that attributes with underscore prefix are NOT stored (Pydantic private fields)."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+            _internal_id: int = 0  # Private field, not persisted
+
+        item = Item(source="test", name="Item", _internal_id=42)
+        await item.insert()
+
+        # Private fields (starting with _) are excluded by Pydantic model_dump
+        row = await graph._conn.query(
+            f"SELECT attr FROM {graph._name}.object WHERE id = %(id)s",
+            id=item.id
+        )
+        assert '_internal_id' not in row[0]['attr']  # Not persisted
+        assert 'name' in row[0]['attr']
+
+        # Reload and verify - private field not restored from DB
+        graph.registry.clear()
+        await graph.load()
+        reloaded = graph.registry[item.id]
+        assert reloaded._internal_id == 0  # Default value, not 42
+
+    async def test_backlink_ids_not_stored_in_database(self, graph):
+        """Test that backlink arrays (_ids fields) are not stored in attr JSONB."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+            books: Backlink['Book']
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author, "books"]
+
+        author = Author(source="test", name="Jane Doe")
+        await author.insert()
+
+        # Check that books_ids is not in JSONB (managed by triggers)
+        row = await graph._conn.query(
+            f"SELECT attr FROM {graph._name}.object WHERE id = %(id)s",
+            id=author.id
+        )
+        assert 'books_ids' not in row[0]['attr']
+
+    async def test_large_jsonb_document(self, graph):
+        """Test handling of large JSONB documents."""
+        class LargeDoc(graph.DBObject):
+            category = "test"
+            type = "large_doc"
+            name: str
+            data: dict
+
+        # Create a large nested structure
+        large_data = {
+            f"key_{i}": {
+                "nested": [j for j in range(100)]
+            }
+            for i in range(100)
+        }
+
+        doc = LargeDoc(source="test", name="Large", data=large_data)
+        await doc.insert()
+
+        # Reload and verify
+        graph.registry.clear()
+        await graph.load()
+
+        reloaded = graph.registry[doc.id]
+        assert reloaded.data == large_data
+
+    async def test_special_json_values(self, graph):
+        """Test handling of special JSON values (null, boolean, numeric edge cases)."""
+        class Special(graph.DBObject):
+            category = "test"
+            type = "special"
+            values: list
+
+        special_values = [
+            None,
+            True,
+            False,
+            0,
+            -1,
+            1.5,
+            -1.5,
+            "",
+            "null",
+            "true",
+            "false",
+        ]
+
+        obj = Special(source="test", values=special_values)
+        await obj.insert()
+
+        # Reload and verify
+        graph.registry.clear()
+        await graph.load()
+
+        reloaded = graph.registry[obj.id]
+        assert reloaded.values == special_values
+
+    async def test_unicode_in_jsonb(self, graph):
+        """Test that Unicode characters are properly stored and retrieved."""
+        class Text(graph.DBObject):
+            category = "test"
+            type = "text"
+            content: str
+            languages: list[str]
+
+        obj = Text(
+            source="test",
+            content="Hello: 你好, Здравствуй, مرحبا, שלום",
+            languages=["中文", "Русский", "العربية", "עברית"]
+        )
+        await obj.insert()
+
+        # Reload and verify
+        graph.registry.clear()
+        await graph.load()
+
+        reloaded = graph.registry[obj.id]
+        assert reloaded.content == "Hello: 你好, Здравствуй, مرحبا, שלום"
+        assert reloaded.languages == ["中文", "Русский", "العربية", "עברית"]
+
+    async def test_history_preserves_all_data_types(self, graph):
+        """Test that history table preserves all data types correctly."""
+        from decimal import Decimal
+
+        class ComplexObj(graph.DBObject):
+            category = "test"
+            type = "complex"
+            name: str
+            amount: Decimal
+            tags: list[str]
+            metadata: dict
+            active: bool
+
+        obj = ComplexObj(
+            source="test",
+            name="Test",
+            amount=Decimal("123.45"),
+            tags=["a", "b"],
+            metadata={"key": "value"},
+            active=True
+        )
+        await obj.insert()
+
+        # Check history
+        history = await graph._conn.query(
+            f"SELECT * FROM {graph._name}.history WHERE id = %(id)s",
+            id=obj.id
+        )
+
+        assert len(history) == 1
+        hist = history[0]
+        assert hist['attr']['name'] == "Test"
+        assert Decimal(str(hist['attr']['amount'])) == Decimal("123.45")
+        assert hist['attr']['tags'] == ["a", "b"]
+        assert hist['attr']['metadata'] == {"key": "value"}
+        assert hist['attr']['active'] is True
