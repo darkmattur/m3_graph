@@ -115,11 +115,11 @@ steps:
         PY
 
       - |
-        if [ -d tests ] && find tests -type f -name "test_*.py" | grep -q .; then
+        if [ -d test ] && find test -type f -name "test_*.py" | grep -q .; then
           echo "Running pytest..."
           pytest -q
         else
-          echo "No tests/ directory with test_*.py files found — skipping pytest."
+          echo "No test/ directory with test_*.py files found — skipping pytest."
         fi
       - rm -rf src/*.egg-info src/*/*.egg-info *.egg-info
     when:
