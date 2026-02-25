@@ -4,6 +4,7 @@ Pytest configuration and fixtures for m3_graph testing.
 Provides PostgreSQL database fixtures and test graph instances.
 Uses existing PostgreSQL instance at localhost:5432.
 """
+import os
 import pytest
 import asyncio
 from typing import AsyncGenerator
@@ -34,13 +35,12 @@ async def db_connection():
     Each test gets its own connection and schema for isolation.
     """
     conn = await connect(
-        host='localhost',
-        port=5432,
-        dbname='m3_test',
+        host=os.getenv("PGHOST", "localhost"),
+        port=int(os.getenv("PGPORT", "5432")),
+        dbname=os.getenv("PGDATABASE", "m3_test"),
     )
     yield conn
     await conn._conn.close()
-
 
 @pytest.fixture
 async def test_schema(db_connection: DBConn):

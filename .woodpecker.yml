@@ -1,0 +1,311 @@
+when:
+  event: [ push, tag, manual ]
+
+steps:
+
+  set-version:
+    image: python:3.13-slim
+    commands:
+      - |
+        python - <<'PY'
+        import os
+        from pathlib import Path
+
+        tag = os.environ.get("CI_COMMIT_TAG", "")
+        if not tag:
+          raise SystemExit("CI_COMMIT_TAG is not set")
+
+        ver = tag[1:] if tag.startswith("v") else tag
+        Path("VERSION").write_text(ver + "\n", encoding="utf-8")
+        print("Version set to", ver)
+        PY
+    when:
+      event: tag
+    
+  test:
+    image: python:3.13-slim
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        environment:
+          POSTGRES_DB: m3_test
+          POSTGRES_USER: m3
+          POSTGRES_PASSWORD: m3
+
+    environment:
+      # Your existing secrets
+      GITEA_URL:
+        from_secret: GITEA_URL
+      GITEA_OWNER:
+        from_secret: GITEA_OWNER
+      GITEA_SVC_USER:
+        from_secret: GITEA_SVC_USER
+      GITEA_SVC_PASSWORD:
+        from_secret: GITEA_SVC_PASSWORD
+
+      # DB connection info for tests (service hostname is "postgres")
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: m3_test
+      PGUSER: m3
+      PGPASSWORD: m3
+
+    commands:
+      - set -eu
+      - python -m pip install --upgrade pip
+
+      # Install pg_isready
+      - apt-get update
+      - apt-get install -y --no-install-recommends postgresql-client
+      - rm -rf /var/lib/apt/lists/*
+
+      # Wait for postgres service
+      - |
+        echo "Waiting for PostgreSQL..."
+        for i in $(seq 1 60); do
+          if pg_isready -h "$PGHOST" -p "$PGPORT" -d "$PGDATABASE" -U "$PGUSER" >/dev/null 2>&1; then
+            echo "PostgreSQL is ready."
+            break
+          fi
+          sleep 1
+        done
+        pg_isready -h "$PGHOST" -p "$PGPORT" -d "$PGDATABASE" -U "$PGUSER"
+
+      - |
+        host="$(echo "$GITEA_URL" | sed -E 's#^https?://##' | cut -d/ -f1)"
+        cat > ~/.netrc <<EOF
+        machine $host
+          login $GITEA_SVC_USER
+          password $GITEA_SVC_PASSWORD
+        EOF
+        chmod 600 ~/.netrc
+
+        export PIP_EXTRA_INDEX_URL="$GITEA_URL/api/packages/$GITEA_OWNER/pypi/simple"
+        export PIP_TRUSTED_HOST="$host"
+        echo "Using extra index: $PIP_EXTRA_INDEX_URL"
+
+      - pip install -e .[dev]
+      - |
+        if [ -d tests ] && find tests -type f -name "test_*.py" | grep -q .; then
+          echo "Running pytest..."
+          pytest -q
+        else
+          echo "No tests/ directory with test_*.py files found — skipping pytest."
+        fi
+      - rm -rf src/*.egg-info src/*/*.egg-info *.egg-info
+    when:
+      event: [ push, tag, manual ]
+    
+  build:
+    image: mambaorg/micromamba:latest
+    depends_on: [ test ]
+    commands:
+      - set -eu
+      - micromamba create -y -n build -c conda-forge python=3.13 conda-build pip python-build
+
+      - micromamba run -n build conda config --set channel_priority strict
+      - micromamba run -n build conda config --add channels conda-forge
+
+      # Build sdist (source tarball)
+      - rm -rf dist
+      - micromamba run -n build python -m build --sdist   
+
+      # Generate conda recipe from pyproject.toml
+      - |
+        micromamba run -n build python - <<'PY'
+        import re
+        import tomllib
+        from pathlib import Path
+
+        with open("pyproject.toml", "rb") as f:
+            data = tomllib.load(f)
+
+        proj = data["project"]
+        pkg_name = proj["name"].lower()
+        import_name = "m3_config"
+
+        version = Path("VERSION").read_text(encoding="utf-8").strip()
+
+        deps = proj.get("dependencies", [])
+
+        def to_conda_req(s: str) -> str:
+            s = s.strip()
+            s = re.sub(r"\s*(>=|<=|==|!=|~=|>|<)\s*", r" \1", s)
+            s = re.sub(r"(>=|<=|==|!=|~=|>|<)\s+", r"\1", s)
+            return s
+
+        run_deps = "\n".join(f"    - {to_conda_req(d)}" for d in deps)
+
+        # Find the sdist file we just built
+        sdists = sorted(Path("dist").glob("*.tar.gz"))
+        if not sdists:
+            raise SystemExit("No sdist found in dist/*.tar.gz")
+        sdist_abs = sdists[0].resolve()
+        sdist_url = sdist_abs.as_uri()
+        
+        meta = f"""\
+        package:
+          name: {pkg_name}
+          version: {version}
+
+        source:
+          url: {sdist_url}
+
+        build:
+          noarch: python
+          script: {{{{ PYTHON }}}} -m pip install . --no-deps -vv
+
+        requirements:
+          host:
+            - python
+            - pip
+            - setuptools
+          run:
+            - python
+        {run_deps}
+
+        test:
+          imports:
+            - {import_name}
+        """
+
+        Path("conda/recipe").mkdir(parents=True, exist_ok=True)
+        Path("conda/recipe/meta.yaml").write_text(meta.strip() + "\n", encoding="utf-8")
+        print("Generated conda/recipe/meta.yaml using sdist:", sdist_abs)
+        PY
+
+      - rm -rf conda-dist
+      - micromamba run -n build conda build -c conda-forge conda/recipe --output-folder conda-dist
+
+      - |
+        micromamba run -n build python - <<'PY'
+        import tarfile, glob
+        sd = sorted(glob.glob("dist/*.tar.gz"))[0]
+        print("sdist:", sd)
+        with tarfile.open(sd, "r:gz") as t:
+            names = [n for n in t.getnames() if "m3_config" in n]
+        print("contains m3_config files:", len(names))
+        print("\n".join(names[:40]))
+        PY
+    when:
+      event: [ push, tag, manual ]
+
+  publish-conda:
+    image: curlimages/curl:8.10.1
+    depends_on: [ build ]
+    environment:
+      CONDA_PUBLISH_URL:
+        from_secret: CONDA_PUBLISH_URL
+    commands:
+      - |
+        set -eu
+        base="$CONDA_PUBLISH_URL"
+
+        found=0
+        while IFS= read -r f; do
+          found=1
+
+          channel="$(basename "$(dirname "$f")")"
+          name="$(basename "$f")"
+
+          echo "Uploading $f -> $base/$channel/$name"
+          curl --fail-with-body -sS \
+            --upload-file "$f" \
+            -X PUT \
+            "$base/$channel/$name"
+        done < <(find conda-dist -type f \( -name '*.conda' -o -name '*.tar.bz2' \) -print)
+
+        if [ "$found" -eq 0 ]; then
+          echo "No conda artifacts produced under conda-dist/"
+          exit 1
+        fi
+    when:
+      event: tag
+
+  publish-gitea:
+    image: curlimages/curl:8.10.1
+    depends_on: [ build ]
+    environment:
+      GITEA_URL:
+        from_secret: GITEA_URL
+      GITEA_OWNER:
+        from_secret: GITEA_OWNER
+      GITEA_SVC_USER:
+        from_secret: GITEA_SVC_USER
+      GITEA_SVC_PASSWORD:
+        from_secret: GITEA_SVC_PASSWORD
+    commands:
+      - |
+        set -eu
+
+        base="$GITEA_URL/api/packages/$GITEA_OWNER/conda"
+        auth="$GITEA_SVC_USER:$GITEA_SVC_PASSWORD"
+
+        found=0
+        while IFS= read -r f; do
+          found=1
+
+          channel="$(basename "$(dirname "$f")")"
+          name="$(basename "$f")"
+
+          echo "Uploading $f -> $base/$channel/$name"
+          curl --fail-with-body -sS \
+            -u "$auth" \
+            --upload-file "$f" \
+            -X PUT \
+            "$base/$channel/$name"
+        done < <(find conda-dist -type f \( -name '*.conda' -o -name '*.tar.bz2' \) -print)
+
+        if [ "$found" -eq 0 ]; then
+          echo "No conda artifacts produced under conda-dist/"
+          exit 1
+        fi
+    when:
+      event: tag
+
+  publish-pypi:
+    image: python:3.13-slim
+    depends_on: [ build ]
+    environment:
+      GITEA_URL:
+        from_secret: GITEA_URL
+      GITEA_OWNER:
+        from_secret: GITEA_OWNER
+      GITEA_SVC_USER:
+        from_secret: GITEA_SVC_USER
+      GITEA_SVC_PASSWORD:
+        from_secret: GITEA_SVC_PASSWORD
+    commands:
+      - |
+        set -eu
+
+        python -m pip install --no-cache-dir -U pip
+        python -m pip install --no-cache-dir build twine
+
+        # Build wheel + sdist
+        rm -rf dist
+        python -m build
+
+        # Sanity check artifacts exist
+        found=0
+        for f in dist/*.whl dist/*.tar.gz; do
+          [ -e "$f" ] || continue
+          found=1
+          break
+        done
+        if [ "$found" -eq 0 ]; then
+          echo "No PyPI artifacts produced in dist/ (expected *.whl and/or *.tar.gz)"
+          exit 1
+        fi
+
+        repo_url="$GITEA_URL/api/packages/$GITEA_OWNER/pypi"
+        export TWINE_REPOSITORY_URL="$repo_url"
+        export TWINE_USERNAME="$GITEA_SVC_USER"
+        export TWINE_PASSWORD="$GITEA_SVC_PASSWORD"
+
+        echo "Uploading Python packages to $repo_url"
+        python -m twine upload --non-interactive dist/*
+    when:
+      event: tag
+  
