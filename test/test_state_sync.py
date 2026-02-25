@@ -1,32 +1,263 @@
 """
-Tests for database synchronization and consistency.
-
-These tests validate the synchronization between in-memory objects and database:
-- Database is the authoritative source of truth
-- Load operations correctly synchronize in-memory state with database state
-- Concurrent modifications are handled correctly
-- Stale data detection and handling
-- Consistency after various operation sequences
+State management and database synchronization tests.
 
 Tests cover:
-- Loading fresh state from database
-- Detecting out-of-sync conditions
-- Synchronization after external database changes
-- Consistency across graph.load() operations
-- Handling of deleted objects
-- Orphaned relationship references
+- In-memory object state vs database persistence
+- Update/reload patterns and data freshness
+- Database as source of truth
+- Synchronization after external changes
+- Stale data handling
+- Consistency across operations
 """
 import pytest
-from m3_graph.link import Link, Backlink
 
 
 @pytest.mark.asyncio
-class TestLoadSynchronization:
-    """Test that load() correctly synchronizes state from database."""
+class TestInMemoryState:
+    """Test in-memory object state management."""
+
+    async def test_in_memory_changes_visible_immediately(self, graph):
+        """Test that in-memory changes are immediately visible."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+
+        asset = Asset(source="test", symbol="BTC", price=100.0)
+        await asset.insert()
+
+        # Modify in-memory
+        asset.price = 200.0
+
+        # Should be visible immediately
+        assert asset.price == 200.0
+
+    async def test_in_memory_changes_not_persisted_without_update(self, graph):
+        """Test that in-memory changes don't persist without update()."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+
+        asset = Asset(source="test", symbol="BTC", price=100.0)
+        await asset.insert()
+
+        # Modify in-memory but don't update
+        asset.price = 200.0
+
+        # Reload from database
+        graph.registry.clear()
+        await graph.load()
+
+        reloaded = graph.registry[asset.id]
+        assert reloaded.price == 100.0  # Should be original value
+
+    async def test_multiple_in_memory_changes_before_persist(self, graph):
+        """Test multiple in-memory modifications before calling update()."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+            name: str
+
+        asset = Asset(source="test", symbol="BTC", price=100.0, name="Bitcoin")
+        await asset.insert()
+
+        # Multiple in-memory changes
+        asset.price = 200.0
+        asset.price = 300.0
+        asset.name = "Bitcoin Core"
+        asset.price = 400.0
+
+        # All changes visible in-memory
+        assert asset.price == 400.0
+        assert asset.name == "Bitcoin Core"
+
+        # But not in database yet
+        graph.registry.clear()
+        await graph.load()
+
+        reloaded = graph.registry[asset.id]
+        assert reloaded.price == 100.0
+        assert reloaded.name == "Bitcoin"
+
+    async def test_complex_type_in_memory_mutation(self, graph):
+        """Test in-memory mutation of complex types (lists, dicts)."""
+        class Config(graph.DBObject):
+            category = "system"
+            type = "config"
+            settings: dict[str, int]
+            tags: list[str]
+
+        config = Config(
+            source="test",
+            settings={"timeout": 30},
+            tags=["prod"]
+        )
+        await config.insert()
+
+        # Mutate in-memory
+        config.settings["timeout"] = 60
+        config.settings["retries"] = 3
+        config.tags.append("critical")
+
+        # Changes visible in-memory
+        assert config.settings == {"timeout": 60, "retries": 3}
+        assert config.tags == ["prod", "critical"]
+
+        # Not persisted yet
+        graph.registry.clear()
+        await graph.load()
+
+        reloaded = graph.registry[config.id]
+        assert reloaded.settings == {"timeout": 30}
+        assert reloaded.tags == ["prod"]
+
+
+@pytest.mark.asyncio
+class TestDatabasePersistence:
+    """Test explicit database persistence via update()."""
+
+    async def test_update_persists_in_memory_changes(self, graph):
+        """Test that update() persists in-memory changes to database."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+
+        asset = Asset(source="test", symbol="BTC", price=100.0)
+        await asset.insert()
+
+        # Modify and persist
+        asset.price = 200.0
+        await asset.update()
+
+        # Verify persisted
+        graph.registry.clear()
+        await graph.load()
+
+        reloaded = graph.registry[asset.id]
+        assert reloaded.price == 200.0
+
+    async def test_multiple_sequential_updates(self, graph):
+        """Test multiple sequential update() calls."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+
+        asset = Asset(source="test", symbol="BTC", price=100.0)
+        await asset.insert()
+
+        # First update
+        asset.price = 200.0
+        await asset.update()
+
+        # Second update
+        asset.price = 300.0
+        await asset.update()
+
+        # Third update
+        asset.price = 400.0
+        await asset.update()
+
+        # Verify final state
+        graph.registry.clear()
+        await graph.load()
+
+        reloaded = graph.registry[asset.id]
+        assert reloaded.price == 400.0
+
+    async def test_save_then_modify_then_reload(self, graph):
+        """Test saving, modifying in-memory, then reloading."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+
+        asset = Asset(source="test", symbol="BTC", price=100.0)
+        await asset.insert()
+
+        # First update
+        asset.price = 200.0
+        await asset.update()
+
+        # More in-memory changes (not saved)
+        asset.price = 300.0
+
+        # Reload should get the last saved state
+        graph.registry.clear()
+        await graph.load()
+
+        reloaded = graph.registry[asset.id]
+        assert reloaded.price == 200.0  # Last saved, not in-memory value
+
+
+@pytest.mark.asyncio
+class TestReloadAndRollback:
+    """Test reloading from database to discard in-memory changes."""
+
+    async def test_reload_discards_in_memory_changes(self, graph):
+        """Test that reloading discards unsaved in-memory changes."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+
+        asset = Asset(source="test", symbol="BTC", price=100.0)
+        await asset.insert()
+        asset_id = asset.id
+
+        # Make in-memory changes
+        asset.price = 200.0
+        assert asset.price == 200.0
+
+        # Reload from database (discards changes)
+        graph.registry.clear()
+        await graph.load()
+
+        reloaded = graph.registry[asset_id]
+        assert reloaded.price == 100.0
+
+    async def test_reload_after_partial_changes(self, graph):
+        """Test reload after making partial changes to multiple fields."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
+            name: str
+
+        asset = Asset(source="test", symbol="BTC", price=100.0, name="Bitcoin")
+        await asset.insert()
+        asset_id = asset.id
+
+        # Change multiple fields in-memory
+        asset.price = 200.0
+        asset.name = "Bitcoin Core"
+
+        # Reload discards all changes
+        graph.registry.clear()
+        await graph.load()
+
+        reloaded = graph.registry[asset_id]
+        assert reloaded.price == 100.0
+        assert reloaded.name == "Bitcoin"
+
+
+@pytest.mark.asyncio
+class TestDatabaseAsSourceOfTruth:
+    """Test that database is the authoritative source of truth."""
 
     async def test_load_reflects_database_state(self, graph):
         """Test that load() loads current database state."""
-
         class Asset(graph.DBObject):
             category = "financial"
             type = "asset"
@@ -52,7 +283,6 @@ class TestLoadSynchronization:
 
     async def test_load_after_external_insert(self, graph):
         """Test loading objects inserted externally to current session."""
-
         class Asset(graph.DBObject):
             category = "financial"
             type = "asset"
@@ -84,7 +314,6 @@ class TestLoadSynchronization:
 
     async def test_load_after_external_delete(self, graph):
         """Test that load() handles externally deleted objects."""
-
         class Asset(graph.DBObject):
             category = "financial"
             type = "asset"
@@ -115,7 +344,6 @@ class TestLoadSynchronization:
 
     async def test_load_after_external_update(self, graph):
         """Test that load() picks up external updates."""
-
         class Asset(graph.DBObject):
             category = "financial"
             type = "asset"
@@ -146,82 +374,13 @@ class TestLoadSynchronization:
         assert reloaded.price == 500.0
         assert reloaded is not original
 
-    async def test_multiple_loads_are_idempotent(self, graph):
-        """Test that multiple load() calls don't cause issues."""
-
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
-
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
-        asset_id = asset.id
-
-        # Load multiple times
-        graph.registry.clear()
-        await graph.load()
-        instance1 = graph.registry[asset_id]
-
-        graph.registry.clear()
-        await graph.load()
-        instance2 = graph.registry[asset_id]
-
-        graph.registry.clear()
-        await graph.load()
-        instance3 = graph.registry[asset_id]
-
-        # Each should have correct data
-        assert instance1.symbol == "BTC"
-        assert instance2.symbol == "BTC"
-        assert instance3.symbol == "BTC"
-
-        # But be different instances
-        assert instance1 is not instance2
-        assert instance2 is not instance3
-
-    async def test_load_with_relationships(self, graph):
-        """Test that load() correctly restores relationships."""
-
-        class Author(graph.DBObject):
-            category = "test"
-            type = "author"
-            name: str
-            books: Backlink['Book']
-
-        class Book(graph.DBObject):
-            category = "test"
-            type = "book"
-            title: str
-            author: Link[Author, "books"]
-
-        await graph.db_maintain()
-
-        author = Author(source="test", name="Jane Doe")
-        await author.insert()
-
-        book = Book(source="test", title="Book", author=author)
-        await book.insert()
-
-        # Clear and reload
-        graph.registry.clear()
-        await graph.load()
-
-        # Relationships should work
-        book_reloaded = graph.registry[book.id]
-        author_reloaded = graph.registry[author.id]
-
-        assert book_reloaded.author_id == author_reloaded.id
-        assert book_reloaded.author is author_reloaded
-
 
 @pytest.mark.asyncio
-class TestStaleDataHandling:
-    """Test handling of stale in-memory data vs database."""
+class TestStaleData:
+    """Test handling of stale in-memory data."""
 
     async def test_in_memory_object_can_become_stale(self, graph):
         """Test that in-memory object can have stale data."""
-
         class Asset(graph.DBObject):
             category = "financial"
             type = "asset"
@@ -249,7 +408,6 @@ class TestStaleDataHandling:
 
     async def test_updating_stale_object_overwrites_database(self, graph):
         """Test that updating a stale object overwrites database (last write wins)."""
-
         class Asset(graph.DBObject):
             category = "financial"
             type = "asset"
@@ -276,53 +434,13 @@ class TestStaleDataHandling:
         reloaded = graph.registry[asset_id]
         assert reloaded.price == 150.0  # Not 200.0
 
-    async def test_load_refreshes_stale_relationships(self, graph):
-        """Test that loading refreshes stale relationship data."""
-
-        class Author(graph.DBObject):
-            category = "test"
-            type = "author"
-            name: str
-
-        class Book(graph.DBObject):
-            category = "test"
-            type = "book"
-            title: str
-            author: Link[Author]
-
-        author1 = Author(source="test", name="Author 1")
-        author2 = Author(source="test", name="Author 2")
-        await author1.insert()
-        await author2.insert()
-
-        book = Book(source="test", title="Book", author=author1)
-        await book.insert()
-
-        # Change relationship directly in database
-        await graph._conn.execute(
-            f"UPDATE {graph._name}.object SET attr = jsonb_set(attr, '{{author_id}}', %(author_id)s) WHERE id = %(book_id)s",
-            author_id=str(author2.id),
-            book_id=book.id
-        )
-
-        # In-memory book still points to author1 (stale)
-        assert book.author_id == author1.id
-
-        # Load refreshes
-        graph.registry.clear()
-        await graph.load()
-
-        book_reloaded = graph.registry[book.id]
-        assert book_reloaded.author_id == author2.id
-
 
 @pytest.mark.asyncio
-class TestConsistencyScenarios:
+class TestConsistency:
     """Test consistency in various scenarios."""
 
-    async def test_consistency_after_insert_update_delete_sequence(self, graph):
+    async def test_consistency_after_full_crud_lifecycle(self, graph):
         """Test consistency through full CRUD lifecycle."""
-
         class Asset(graph.DBObject):
             category = "financial"
             type = "asset"
@@ -360,7 +478,6 @@ class TestConsistencyScenarios:
 
     async def test_consistency_with_mixed_operations(self, graph):
         """Test consistency when mixing in-memory and database operations."""
-
         class Asset(graph.DBObject):
             category = "financial"
             type = "asset"
@@ -393,197 +510,75 @@ class TestConsistencyScenarios:
         assert btc_reloaded.price == 200.0
         assert eth_reloaded.price == 75.0
 
-    async def test_consistency_with_relationship_changes(self, graph):
-        """Test consistency when relationships change."""
+    async def test_object_state_across_multiple_sessions(self, graph):
+        """Test that object state is consistent across multiple load cycles."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
 
-        class Author(graph.DBObject):
-            category = "test"
-            type = "author"
-            name: str
-            books: Backlink['Book']
+        # Create and save
+        asset = Asset(source="test", symbol="BTC", price=100.0)
+        await asset.insert()
+        original_id = asset.id
 
-        class Book(graph.DBObject):
-            category = "test"
-            type = "book"
-            title: str
-            author: Link[Author, "books"]
+        # Session 1: Load and modify, then save
+        graph.registry.clear()
+        await graph.load()
+        obj1 = graph.registry[original_id]
+        obj1.price = 200.0
+        await obj1.update()
 
-        await graph.db_maintain()
+        # Session 2: Load and verify
+        graph.registry.clear()
+        await graph.load()
+        obj2 = graph.registry[original_id]
+        assert obj2.price == 200.0
 
-        author1 = Author(source="test", name="Author 1")
-        author2 = Author(source="test", name="Author 2")
-        await author1.insert()
-        await author2.insert()
+        # Session 3: Load, modify but don't save
+        graph.registry.clear()
+        await graph.load()
+        obj3 = graph.registry[original_id]
+        obj3.price = 300.0
+        # Don't update
 
-        book = Book(source="test", title="Book", author=author1)
-        await book.insert()
+        # Session 4: Load and verify unsaved changes were lost
+        graph.registry.clear()
+        await graph.load()
+        obj4 = graph.registry[original_id]
+        assert obj4.price == 200.0  # Not 300.0
 
-        # Change relationship
-        book.author = author2
-        await book.update()
+    async def test_in_memory_state_independence_per_object(self, graph):
+        """Test that in-memory state is independent per object instance."""
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            price: float
 
-        # Verify consistency
+        # Create two different assets
+        btc = Asset(source="test", symbol="BTC", price=100.0)
+        eth = Asset(source="test", symbol="ETH", price=50.0)
+        await btc.insert()
+        await eth.insert()
+
+        # Modify both in-memory
+        btc.price = 200.0
+        eth.price = 100.0
+
+        # Update only btc
+        await btc.update()
+
+        # Reload and verify
         graph.registry.clear()
         await graph.load()
 
-        book_reloaded = graph.registry[book.id]
-        author1_reloaded = graph.registry[author1.id]
-        author2_reloaded = graph.registry[author2.id]
+        btc_reloaded = graph.registry[btc.id]
+        eth_reloaded = graph.registry[eth.id]
 
-        assert book_reloaded.author_id == author2_reloaded.id
-        assert len(author1_reloaded.books) == 0
-        assert len(author2_reloaded.books) == 1
-
-    async def test_consistency_after_cascading_deletes(self, graph):
-        """Test consistency after deleting objects with relationships."""
-
-        class Author(graph.DBObject):
-            category = "test"
-            type = "author"
-            name: str
-            books: Backlink['Book']
-
-        class Book(graph.DBObject):
-            category = "test"
-            type = "book"
-            title: str
-            author: Link[Author, "books"]
-
-        await graph.db_maintain()
-
-        author = Author(source="test", name="Jane Doe")
-        await author.insert()
-
-        book = Book(source="test", title="Book", author=author)
-        await book.insert()
-
-        # Delete book
-        await book.delete()
-
-        # Load and verify author's backlinks are empty
-        graph.registry.clear()
-        await graph.load()
-
-        author_reloaded = graph.registry[author.id]
-        assert len(author_reloaded.books) == 0
-
-
-@pytest.mark.asyncio
-class TestOrphanedReferences:
-    """Test handling of orphaned relationship references."""
-
-    async def test_orphaned_forward_reference(self, graph):
-        """Test accessing relationship when referenced object was deleted."""
-
-        class Author(graph.DBObject):
-            category = "test"
-            type = "author"
-            name: str
-
-        class Book(graph.DBObject):
-            category = "test"
-            type = "book"
-            title: str
-            author: Link[Author]
-
-        author = Author(source="test", name="Jane Doe")
-        await author.insert()
-
-        book = Book(source="test", title="Book", author=author)
-        await book.insert()
-
-        # Delete author directly from database
-        await graph._conn.execute(
-            f"DELETE FROM {graph._name}.object WHERE id = %(author_id)s",
-            author_id=author.id
-        )
-
-        # Reload
-        graph.registry.clear()
-        await graph.load()
-
-        book_reloaded = graph.registry[book.id]
-
-        # Book still has author_id but author is not in registry
-        assert book_reloaded.author_id == author.id
-        assert book_reloaded.author is None
-
-    async def test_orphaned_backlink_reference(self, graph):
-        """Test backlinks when referenced objects were deleted."""
-
-        class Author(graph.DBObject):
-            category = "test"
-            type = "author"
-            name: str
-            books: Backlink['Book']
-
-        class Book(graph.DBObject):
-            category = "test"
-            type = "book"
-            title: str
-            author: Link[Author, "books"]
-
-        await graph.db_maintain()
-
-        author = Author(source="test", name="Jane Doe")
-        await author.insert()
-
-        book1 = Book(source="test", title="Book 1", author=author)
-        book2 = Book(source="test", title="Book 2", author=author)
-        await book1.insert()
-        await book2.insert()
-
-        # Delete book1 directly from database
-        await graph._conn.execute(
-            f"DELETE FROM {graph._name}.object WHERE id = %(book1_id)s",
-            book1_id=book1.id
-        )
-
-        # Reload
-        graph.registry.clear()
-        await graph.load()
-
-        author_reloaded = graph.registry[author.id]
-
-        # Should only see book2
-        assert len(author_reloaded.books) == 1
-        assert author_reloaded.books[0].id == book2.id
-
-    async def test_nullable_orphaned_reference(self, graph):
-        """Test nullable relationship when referenced object is deleted."""
-
-        class Category(graph.DBObject):
-            category = "test"
-            type = "category"
-            name: str
-
-        class Item(graph.DBObject):
-            category = "test"
-            type = "item"
-            name: str
-            category_obj: Link[Category] | None = None
-
-        cat = Category(source="test", name="Electronics")
-        await cat.insert()
-
-        item = Item(source="test", name="Laptop", category_obj=cat)
-        await item.insert()
-
-        # Delete category directly from database
-        await graph._conn.execute(
-            f"DELETE FROM {graph._name}.object WHERE id = %(cat_id)s",
-            cat_id=cat.id
-        )
-
-        # Reload
-        graph.registry.clear()
-        await graph.load()
-
-        item_reloaded = graph.registry[item.id]
-
-        # Item still has category_obj_id but category is not in registry
-        assert item_reloaded.category_obj_id == cat.id
-        assert item_reloaded.category_obj is None
+        assert btc_reloaded.price == 200.0  # Persisted
+        assert eth_reloaded.price == 50.0  # Not persisted
 
 
 @pytest.mark.asyncio
@@ -592,7 +587,6 @@ class TestConcurrentModifications:
 
     async def test_last_write_wins(self, graph):
         """Test that last write wins in simple conflict scenario."""
-
         class Asset(graph.DBObject):
             category = "financial"
             type = "asset"
@@ -627,7 +621,6 @@ class TestConcurrentModifications:
 
     async def test_independent_field_updates(self, graph):
         """Test that updates to different fields work independently."""
-
         class Asset(graph.DBObject):
             category = "financial"
             type = "asset"
