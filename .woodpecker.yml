@@ -1,8 +1,15 @@
 when:
   event: [ push, tag, manual ]
 
-steps:
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: m3_test
+      POSTGRES_USER: m3
+      POSTGRES_PASSWORD: m3
 
+steps:
   set-version:
     image: python:3.13-slim
     commands:
@@ -21,20 +28,10 @@ steps:
         PY
     when:
       event: tag
-    
+
   test:
     image: python:3.13-slim
-
-    services:
-      postgres:
-        image: postgres:16-alpine
-        environment:
-          POSTGRES_DB: m3_test
-          POSTGRES_USER: m3
-          POSTGRES_PASSWORD: m3
-
     environment:
-      # Your existing secrets
       GITEA_URL:
         from_secret: GITEA_URL
       GITEA_OWNER:
@@ -44,7 +41,7 @@ steps:
       GITEA_SVC_PASSWORD:
         from_secret: GITEA_SVC_PASSWORD
 
-      # DB connection info for tests (service hostname is "postgres")
+      # Point tests at the postgres service hostname
       PGHOST: postgres
       PGPORT: 5432
       PGDATABASE: m3_test
@@ -54,23 +51,6 @@ steps:
     commands:
       - set -eu
       - python -m pip install --upgrade pip
-
-      # Install pg_isready
-      - apt-get update
-      - apt-get install -y --no-install-recommends postgresql-client
-      - rm -rf /var/lib/apt/lists/*
-
-      # Wait for postgres service
-      - |
-        echo "Waiting for PostgreSQL..."
-        for i in $(seq 1 60); do
-          if pg_isready -h "$PGHOST" -p "$PGPORT" -d "$PGDATABASE" -U "$PGUSER" >/dev/null 2>&1; then
-            echo "PostgreSQL is ready."
-            break
-          fi
-          sleep 1
-        done
-        pg_isready -h "$PGHOST" -p "$PGPORT" -d "$PGDATABASE" -U "$PGUSER"
 
       - |
         host="$(echo "$GITEA_URL" | sed -E 's#^https?://##' | cut -d/ -f1)"
@@ -86,6 +66,54 @@ steps:
         echo "Using extra index: $PIP_EXTRA_INDEX_URL"
 
       - pip install -e .[dev]
+
+      # Wait for postgres to accept connections
+      - |
+        python - <<'PY'
+        import os, time, sys
+
+        host = os.environ.get("PGHOST", "postgres")
+        port = int(os.environ.get("PGPORT", "5432"))
+        db   = os.environ.get("PGDATABASE", "m3_test")
+        user = os.environ.get("PGUSER", "m3")
+        pw   = os.environ.get("PGPASSWORD", "m3")
+
+        # Use asyncpg if you have it (common for async tests); fallback to psycopg/psycopg2 if present.
+        def try_asyncpg():
+          import asyncio
+          import asyncpg
+          async def _go():
+            conn = await asyncpg.connect(host=host, port=port, database=db, user=user, password=pw)
+            await conn.close()
+          asyncio.run(_go())
+
+        def try_psycopg():
+          try:
+            import psycopg
+            conn = psycopg.connect(host=host, port=port, dbname=db, user=user, password=pw)
+            conn.close()
+            return
+          except Exception:
+            import psycopg2
+            conn = psycopg2.connect(host=host, port=port, dbname=db, user=user, password=pw)
+            conn.close()
+
+        last = None
+        for i in range(60):
+          try:
+            try:
+              try_asyncpg()
+            except Exception:
+              try_psycopg()
+            print("PostgreSQL is ready.")
+            sys.exit(0)
+          except Exception as e:
+            last = e
+            time.sleep(1)
+
+        raise SystemExit(f"PostgreSQL not ready after 60s: {last!r}")
+        PY
+
       - |
         if [ -d tests ] && find tests -type f -name "test_*.py" | grep -q .; then
           echo "Running pytest..."
