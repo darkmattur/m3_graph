@@ -345,7 +345,7 @@ class TestErrorHandling:
             parent: Link[Parent]  # Required
 
         # Try to create with None parent
-        with pytest.raises(ValueError, match="required"):
+        with pytest.raises(ValueError, match="'parent' is required"):
             Child(source="test", name="Orphan", parent=None)
 
     async def test_setting_required_relationship_to_none_raises_error(self, graph):
@@ -368,7 +368,7 @@ class TestErrorHandling:
         await child.insert()
 
         # Try to set to None
-        with pytest.raises(ValueError, match="required"):
+        with pytest.raises(ValueError, match="parent is required"):
             child.parent = None
 
     async def test_assigning_unsaved_object_raises_error(self, graph):
