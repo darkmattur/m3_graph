@@ -4,7 +4,7 @@ from pathlib import Path
 from collections import defaultdict
 from typing import Type, ClassVar
 
-from .conn import DBConn
+from .conn import connect, DBConn
 from .object import DBObject
 
 
@@ -46,8 +46,21 @@ class Graph:
         # Type registries
         cls.types = dict()
         cls.subtypes = dict()
-
-    def __init__(self, conn: DBConn, name: str = 'catalog'):
+    
+    @classmethod
+    async def connect(
+        cls,
+        host: str, dbname: str, schema: str = 'catalog', port: int | None = None,
+        user: str | None = None, password: str | None = None, create: bool = False,
+        **kwargs
+    ):
+        conn = await connect(
+            host=host, port=port, dbname=dbname,
+            user=user, password=password, **kwargs
+        )
+        return cls(conn, schema)
+    
+    def __init__(self, conn: DBConn, schema: str = 'catalog'):
         """
         Initialize a Graph instance.
 
@@ -59,7 +72,7 @@ class Graph:
             raise TypeError('Graph class cannot be initialised direcly!')
 
         self._conn = conn
-        self._name = name
+        self._schema = schema
 
         # Object registries
         self.registry = dict()
@@ -78,16 +91,19 @@ class Graph:
     _sql_folder_path = Path(os.path.dirname(__file__)) / 'sql'
 
     @classmethod
-    async def db_create(cls, conn: DBConn, name: str = 'catalog'):
+    async def create(cls, conn: DBConn, name: str = 'catalog'):
         for file in sorted(cls._sql_folder_path.glob('*.sql')):
             sql_def = file.read_text().replace('{name}', name)
             await conn.execute(sql_def)
+        
+        graph = cls(conn, name)
+        await graph.maintain()
 
-        return cls(conn, name)
+        return graph
     
-    async def db_maintain(self):
+    async def maintain(self):
         await asyncio.gather(*(
-            db_cls.db_maintain() for db_cls in self.DBObject.__subclasses__()
+            db_cls.maintain() for db_cls in self.DBObject.__subclasses__()
         ))
     
     ####################################################################################
@@ -114,7 +130,7 @@ class Graph:
         """Load all objects from database into this graph."""
         # Load all objects from the database in one query
         rows = await self._conn.query(
-            f"SELECT id, category, type, subtype, attr, source FROM {self._name}.object ORDER BY id"
+            f"SELECT id, category, type, subtype, attr, source FROM {self._schema}.object ORDER BY id"
         )
 
         # Initialize objects one by one using the subtype registry
@@ -147,7 +163,7 @@ class Graph:
 
         result = await self._conn.query(
             f"""
-            INSERT INTO {self._name}.object (category, type, subtype, attr, source)
+            INSERT INTO {self._schema}.object (category, type, subtype, attr, source)
             VALUES (%(category)s, %(type)s, %(subtype)s, %(attr)s, %(source)s)
             RETURNING id
             """,
@@ -172,7 +188,7 @@ class Graph:
 
         await self._conn.execute(
             f"""
-            UPDATE {self._name}.object
+            UPDATE {self._schema}.object
             SET category = %(category)s, type = %(type)s, subtype = %(subtype)s, attr = %(attr)s, source = %(source)s
             WHERE id = %(id)s
             """,
@@ -189,7 +205,7 @@ class Graph:
         if obj.id is None:
             raise ValueError("Cannot delete object without id")
 
-        await self._conn.execute(f"DELETE FROM {self._name}.object WHERE id = %(id)s", id=obj.id)
+        await self._conn.execute(f"DELETE FROM {self._schema}.object WHERE id = %(id)s", id=obj.id)
 
         self.registry.pop(obj.id, None)
         if hasattr(obj, 'type') and obj.type:

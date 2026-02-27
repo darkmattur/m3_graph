@@ -355,7 +355,7 @@ class DBObject(BaseModel):
 
         await cls.graph._conn.execute(
             f"""
-            INSERT INTO {cls.graph._name}.meta_relationship (category, type, subtype, forward, back)
+            INSERT INTO {cls.graph._schema}.meta_relationship (category, type, subtype, forward, back)
             VALUES (%(category)s, %(type)s, %(subtype)s, %(forward)s, %(back)s)
             ON CONFLICT (category, type, subtype)
             DO UPDATE SET forward = EXCLUDED.forward, back = EXCLUDED.back
@@ -386,12 +386,12 @@ class DBObject(BaseModel):
 
                 await cls.graph._conn.execute(f"""
                     CREATE UNIQUE INDEX IF NOT EXISTS {idx_name}
-                    ON {cls.graph._name}.object ({expr})
+                    ON {cls.graph._schema}.object ({expr})
                     WHERE {attribute} = '{attribute_value}'
                 """)
 
     @classmethod
-    async def db_maintain(cls):
+    async def maintain(cls):
         """Perform database maintenance tasks for this type."""
         await cls._register_relationships()
         await cls._create_unique_index()
