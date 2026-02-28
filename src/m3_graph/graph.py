@@ -58,7 +58,13 @@ class Graph:
             host=host, port=port, dbname=dbname,
             user=user, password=password, **kwargs
         )
-        return cls(conn, schema)
+        graph = cls(conn, schema)
+
+        if create:
+            await graph.create(conn, schema)
+        
+        return graph
+
     
     def __init__(self, conn: DBConn, schema: str = 'catalog'):
         """
