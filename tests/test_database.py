@@ -1610,3 +1610,548 @@ class TestSQLFunctions:
         assert task2.id in ids
         assert task3.id in ids
         assert len(result) == 6
+
+
+@pytest.mark.asyncio
+class TestObjectLoading:
+    """Test the DBObject.load() method for type-based loading."""
+
+    async def test_load_simple_type_without_expansion(self, graph):
+        """Test loading objects of a simple type without relationship expansion."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+
+        await Item.maintain()
+
+        item1 = Item(source="test", name="Item1")
+        item2 = Item(source="test", name="Item2")
+        await item1.insert()
+        await item2.insert()
+
+        # Clear registry and load
+        graph.registry.clear()
+        loaded = await Item.load()
+
+        assert len(loaded) == 2
+        assert {obj.name for obj in loaded} == {"Item1", "Item2"}
+        assert all(obj.id in graph.registry for obj in loaded)
+
+    async def test_load_with_inherited_types(self, graph):
+        """Test that load() includes objects of inherited subtypes."""
+        class Animal(graph.DBObject):
+            category = "biology"
+            type = "animal"
+            name: str
+
+        class Dog(Animal):
+            type = "dog"
+            breed: str
+
+        class Cat(Animal):
+            type = "cat"
+            color: str
+
+        await Animal.maintain()
+        await Dog.maintain()
+        await Cat.maintain()
+
+        dog = Dog(source="test", name="Buddy", breed="Labrador")
+        cat = Cat(source="test", name="Whiskers", color="Orange")
+        await dog.insert()
+        await cat.insert()
+
+        # Load from Animal (parent type) should get both dog and cat
+        graph.registry.clear()
+        loaded = await Animal.load()
+
+        assert len(loaded) == 2
+        assert {obj.name for obj in loaded} == {"Buddy", "Whiskers"}
+        assert any(isinstance(obj, Dog) for obj in loaded)
+        assert any(isinstance(obj, Cat) for obj in loaded)
+
+    async def test_load_with_expansion_forward_refs(self, graph):
+        """Test loading with expansion through forward relationships."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author]
+
+        await Author.maintain()
+        await Book.maintain()
+
+        author1 = Author(source="test", name="Author1")
+        author2 = Author(source="test", name="Author2")
+        await author1.insert()
+        await author2.insert()
+
+        book1 = Book(source="test", title="Book1", author=author1)
+        book2 = Book(source="test", title="Book2", author=author1)
+        await book1.insert()
+        await book2.insert()
+
+        # Load books with expansion should also load authors
+        graph.registry.clear()
+        loaded = await Book.load(expand=True)
+
+        loaded_ids = {obj.id for obj in loaded}
+        assert book1.id in loaded_ids
+        assert book2.id in loaded_ids
+        assert author1.id in loaded_ids
+        # author2 should NOT be loaded (no book references it)
+        assert author2.id not in loaded_ids
+
+    async def test_load_with_expansion_backlinks(self, graph):
+        """Test loading with expansion through backlink relationships."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author_load_test"
+            name: str
+            books: Backlink['Book']
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book_load_test"
+            title: str
+            author: Link[Author, "books"]
+
+        await Author.maintain()
+        await Book.maintain()
+
+        author = Author(source="test", name="Jane Doe")
+        await author.insert()
+
+        book1 = Book(source="test", title="Book1", author=author)
+        book2 = Book(source="test", title="Book2", author=author)
+        await book1.insert()
+        await book2.insert()
+
+        # Load authors with expansion should also load books
+        graph.registry.clear()
+        loaded = await Author.load(expand=True)
+
+        loaded_ids = {obj.id for obj in loaded}
+        assert author.id in loaded_ids
+        assert book1.id in loaded_ids
+        assert book2.id in loaded_ids
+        assert len(loaded) == 3
+
+    async def test_load_multilevel_inheritance(self, graph):
+        """Test loading with multiple levels of inheritance."""
+        class Vehicle(graph.DBObject):
+            category = "transport"
+            type = "vehicle"
+            name: str
+
+        class Car(Vehicle):
+            type = "car"
+            doors: int
+
+        class SportsCar(Car):
+            type = "sports_car"
+            top_speed: int
+
+        await Vehicle.maintain()
+        await Car.maintain()
+        await SportsCar.maintain()
+
+        sports_car = SportsCar(source="test", name="Ferrari", doors=2, top_speed=200)
+        regular_car = Car(source="test", name="Sedan", doors=4)
+        await sports_car.insert()
+        await regular_car.insert()
+
+        # Load from Vehicle should get all descendants
+        graph.registry.clear()
+        loaded = await Vehicle.load()
+
+        assert len(loaded) == 2
+        assert {obj.name for obj in loaded} == {"Ferrari", "Sedan"}
+
+        # Load from Car should get Car and SportsCar
+        graph.registry.clear()
+        loaded = await Car.load()
+
+        assert len(loaded) == 2
+
+    async def test_load_returns_already_loaded_objects(self, graph):
+        """Test that load() reuses already-loaded objects from registry."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+
+        await Item.maintain()
+
+        item = Item(source="test", name="Item1")
+        await item.insert()
+
+        # First load
+        loaded1 = await Item.load()
+        obj1 = loaded1[0]
+
+        # Second load should return same object instance
+        loaded2 = await Item.load()
+        obj2 = loaded2[0]
+
+        assert obj1 is obj2  # Same instance
+
+    async def test_load_empty_result(self, graph):
+        """Test loading when no objects exist."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+
+        await Item.maintain()
+
+        loaded = await Item.load()
+
+        assert loaded == []
+
+    async def test_load_complex_graph_with_expansion(self, graph):
+        """Test loading a complex graph with multiple relationship levels."""
+        class Company(graph.DBObject):
+            category = "test"
+            type = "company"
+            name: str
+
+        class Department(graph.DBObject):
+            category = "test"
+            type = "department"
+            name: str
+            company: Link[Company]
+
+        class Employee(graph.DBObject):
+            category = "test"
+            type = "employee"
+            name: str
+            department: Link[Department]
+
+        await Company.maintain()
+        await Department.maintain()
+        await Employee.maintain()
+
+        company = Company(source="test", name="ACME Corp")
+        await company.insert()
+
+        dept = Department(source="test", name="Engineering", company=company)
+        await dept.insert()
+
+        emp1 = Employee(source="test", name="Alice", department=dept)
+        emp2 = Employee(source="test", name="Bob", department=dept)
+        await emp1.insert()
+        await emp2.insert()
+
+        # Load employees with expansion should load dept and company too
+        graph.registry.clear()
+        loaded = await Employee.load(expand=True)
+
+        loaded_ids = {obj.id for obj in loaded}
+        assert emp1.id in loaded_ids
+        assert emp2.id in loaded_ids
+        assert dept.id in loaded_ids
+        assert company.id in loaded_ids
+        assert len(loaded) == 4
+
+    async def test_load_without_type_raises_error(self, graph):
+        """Test that calling load() on a class without type raises error."""
+        class NoType(graph.DBObject):
+            category = "test"
+            name: str
+
+        # Should raise ValueError
+        with pytest.raises(ValueError, match="without a type attribute"):
+            await NoType.load()
+
+    async def test_load_preserves_all_attributes(self, graph):
+        """Test that loaded objects have all their attributes correctly restored."""
+        from decimal import Decimal
+
+        class Product(graph.DBObject):
+            category = "test"
+            type = "product"
+            name: str
+            price: Decimal
+            tags: list[str]
+
+        await Product.maintain()
+
+        product = Product(
+            source="test",
+            name="Widget",
+            price=Decimal("19.99"),
+            tags=["new", "featured"]
+        )
+        await product.insert()
+
+        graph.registry.clear()
+        loaded = await Product.load()
+
+        assert len(loaded) == 1
+        obj = loaded[0]
+        assert obj.name == "Widget"
+        assert obj.price == Decimal("19.99")
+        assert obj.tags == ["new", "featured"]
+        assert obj.source == "test"
+
+
+@pytest.mark.asyncio
+class TestObjectQuerying:
+    """Test the DBObject.all(), .get(), and .filter() methods for querying in-memory objects."""
+
+    async def test_all_returns_all_objects_of_type(self, graph):
+        """Test that all() returns all objects of a type from the registry."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+
+        await Item.maintain()
+
+        item1 = Item(source="test", name="Item1")
+        item2 = Item(source="test", name="Item2")
+        await item1.insert()
+        await item2.insert()
+
+        all_items = Item.all()
+
+        assert len(all_items) == 2
+        assert {obj.name for obj in all_items} == {"Item1", "Item2"}
+
+    async def test_all_empty_when_no_objects(self, graph):
+        """Test that all() returns empty list when no objects exist."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item_all_test"
+            name: str
+
+        await Item.maintain()
+
+        assert Item.all() == []
+
+    async def test_get_by_unique_constraint(self, graph):
+        """Test get() with a unique constraint."""
+        class User(graph.DBObject):
+            category = "test"
+            type = "user"
+            email: str
+            name: str
+            type_unique_attr = ["email"]
+
+        await User.maintain()
+
+        user = User(source="test", email="user@example.com", name="John")
+        await user.insert()
+
+        # Get by unique email
+        found = User.get(email="user@example.com")
+
+        assert found is user
+        assert found.name == "John"
+
+    async def test_get_by_computed_property(self, graph):
+        """Test get() with a computed property index."""
+        class Asset(graph.DBObject):
+            category = "test"
+            type = "asset"
+            symbol: str
+            name: str
+            computed_unique_attr = ["full_name"]
+
+            @property
+            def full_name(self):
+                return f"{self.symbol}:{self.name}"
+
+        await Asset.maintain()
+
+        asset = Asset(source="test", symbol="BTC", name="Bitcoin")
+        await asset.insert()
+
+        # Get by computed property
+        found = Asset.get(full_name="BTC:Bitcoin")
+
+        assert found is asset
+
+    async def test_get_raises_keyerror_when_not_found(self, graph):
+        """Test that get() raises KeyError when object not found."""
+        class User(graph.DBObject):
+            category = "test"
+            type = "user_get_test"
+            email: str
+            type_unique_attr = ["email"]
+
+        await User.maintain()
+
+        with pytest.raises(KeyError, match="No User found"):
+            User.get(email="nonexistent@example.com")
+
+    async def test_get_raises_valueerror_no_unique_constraint(self, graph):
+        """Test that get() raises ValueError when no unique constraint matches."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item_get_test"
+            name: str
+            description: str
+            type_unique_attr = ["name"]
+
+        await Item.maintain()
+
+        item = Item(source="test", name="Item", description="Desc")
+        await item.insert()
+
+        # Try to get by non-unique attribute
+        with pytest.raises(ValueError, match="No unique constraint"):
+            Item.get(description="Desc")
+
+    async def test_get_raises_valueerror_no_kwargs(self, graph):
+        """Test that get() raises ValueError when called without arguments."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+
+        with pytest.raises(ValueError, match="At least one keyword argument required"):
+            Item.get()
+
+    async def test_get_with_multi_column_constraint(self, graph):
+        """Test get() with a multi-column unique constraint."""
+        class Location(graph.DBObject):
+            category = "test"
+            type = "location"
+            country: str
+            city: str
+            name: str
+            type_unique_attr = [("country", "city")]
+
+        await Location.maintain()
+
+        loc = Location(source="test", country="USA", city="NYC", name="Times Square")
+        await loc.insert()
+
+        # Get by composite key
+        found = Location.get(country="USA", city="NYC")
+
+        assert found is loc
+        assert found.name == "Times Square"
+
+    async def test_filter_by_single_attribute(self, graph):
+        """Test filter() with a single attribute."""
+        class Task(graph.DBObject):
+            category = "test"
+            type = "task"
+            title: str
+            status: str
+
+        await Task.maintain()
+
+        task1 = Task(source="test", title="Task1", status="pending")
+        task2 = Task(source="test", title="Task2", status="completed")
+        task3 = Task(source="test", title="Task3", status="pending")
+        await task1.insert()
+        await task2.insert()
+        await task3.insert()
+
+        # Filter by status
+        pending = Task.filter(status="pending")
+
+        assert len(pending) == 2
+        assert {t.title for t in pending} == {"Task1", "Task3"}
+
+    async def test_filter_by_multiple_attributes(self, graph):
+        """Test filter() with multiple attributes."""
+        class Product(graph.DBObject):
+            category = "test"
+            type = "product_filter_test"
+            name: str
+            category_name: str
+            price: int
+
+        await Product.maintain()
+
+        p1 = Product(source="test", name="P1", category_name="electronics", price=100)
+        p2 = Product(source="test", name="P2", category_name="electronics", price=200)
+        p3 = Product(source="test", name="P3", category_name="books", price=100)
+        await p1.insert()
+        await p2.insert()
+        await p3.insert()
+
+        # Filter by category and price
+        results = Product.filter(category_name="electronics", price=100)
+
+        assert len(results) == 1
+        assert results[0].name == "P1"
+
+    async def test_filter_returns_empty_list_no_matches(self, graph):
+        """Test that filter() returns empty list when no matches."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item_filter_test"
+            name: str
+            status: str
+
+        await Item.maintain()
+
+        item = Item(source="test", name="Item", status="active")
+        await item.insert()
+
+        results = Item.filter(status="deleted")
+
+        assert results == []
+
+    async def test_filter_no_kwargs_returns_all(self, graph):
+        """Test that filter() with no kwargs returns all objects."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item_filter_all_test"
+            name: str
+
+        await Item.maintain()
+
+        item1 = Item(source="test", name="Item1")
+        item2 = Item(source="test", name="Item2")
+        await item1.insert()
+        await item2.insert()
+
+        results = Item.filter()
+
+        assert len(results) == 2
+        assert {obj.id for obj in results} == {item1.id, item2.id}
+
+    async def test_all_get_filter_work_together(self, graph):
+        """Test that all(), get(), and filter() work together correctly."""
+        class User(graph.DBObject):
+            category = "test"
+            type = "user_combined_test"
+            email: str
+            name: str
+            role: str
+            type_unique_attr = ["email"]
+
+        await User.maintain()
+
+        admin = User(source="test", email="admin@test.com", name="Admin", role="admin")
+        user1 = User(source="test", email="user1@test.com", name="User1", role="user")
+        user2 = User(source="test", email="user2@test.com", name="User2", role="user")
+        await admin.insert()
+        await user1.insert()
+        await user2.insert()
+
+        # Test all()
+        all_users = User.all()
+        assert len(all_users) == 3
+
+        # Test get()
+        found_admin = User.get(email="admin@test.com")
+        assert found_admin is admin
+
+        # Test filter()
+        regular_users = User.filter(role="user")
+        assert len(regular_users) == 2
+        assert {u.name for u in regular_users} == {"User1", "User2"}

@@ -314,6 +314,157 @@ class DBObject(BaseModel):
     # Database Methods
     ####################################################################################
 
+    @classmethod
+    async def load(cls, expand: bool = False):
+        """Load all objects of this type (including inherited subtypes) into the graph.
+
+        Args:
+            expand: If True, also load all objects connected via relationships (forward and backward)
+
+        Returns:
+            List of loaded objects
+        """
+        if not hasattr(cls, 'type') or cls.type is None:
+            raise ValueError(f"Cannot load objects for class {cls.__name__} without a type attribute")
+
+        # Use SQL function to fetch objects by type (with optional expansion)
+        rows = await cls.graph._conn.query(
+            f"SELECT * FROM {cls.graph._schema}.fetch_object_by_type(%(type)s, %(expand)s)",
+            type=cls.type,
+            expand=expand
+        )
+
+        # Load objects into the registry
+        loaded_objects = []
+        graph_cls = type(cls.graph)
+
+        for row in rows:
+            # Skip if already loaded
+            if row['id'] in cls.graph.registry:
+                loaded_objects.append(cls.graph.registry[row['id']])
+                continue
+
+            subtype = row['subtype']
+
+            # Get the appropriate class for this subtype
+            if subtype in graph_cls.subtypes:
+                obj_cls = graph_cls.subtypes[subtype]
+            elif row['type'] in graph_cls.types:
+                obj_cls = graph_cls.types[row['type']]
+            else:
+                # Skip objects with unregistered types
+                continue
+
+            # Create the object with all its attributes
+            obj_data = {
+                'id': row['id'],
+                'source': row['source'],
+                **row['attr']
+            }
+
+            # Initialize the object (this registers it automatically)
+            obj = obj_cls(**obj_data)
+            loaded_objects.append(obj)
+
+        return loaded_objects
+
+    @classmethod
+    def all(cls):
+        """Get all objects of this type currently in the graph registry.
+
+        Returns:
+            List of objects of this type
+        """
+        if not hasattr(cls, 'type') or cls.type is None:
+            return []
+
+        # Get objects from the type-specific registry
+        return list(cls.graph.registry_type.get(cls.type, {}).values())
+
+    @classmethod
+    def get(cls, **kwargs):
+        """Retrieve a single object by unique attributes or computed properties.
+
+        Uses in-memory indexes for fast lookups. Searches in order:
+        1. Computed property indexes (for single-property lookups)
+        2. Subtype unique constraints (most specific)
+        3. Type unique constraints
+        4. Category unique constraints (least specific)
+
+        Args:
+            **kwargs: Attribute values to search for
+
+        Returns:
+            The matching object
+
+        Raises:
+            ValueError: No unique constraint matches provided kwargs
+            KeyError: No object found matching the query
+
+        Example:
+            user = User.get(email="user@example.com")
+            asset = Asset.get(symbol="BTC")
+        """
+        if not kwargs:
+            raise ValueError("At least one keyword argument required")
+
+        # Check computed property indexes first (single property lookups)
+        if len(kwargs) == 1:
+            prop_name = next(iter(kwargs.keys()))
+            if prop_name in cls._computed_indexes:
+                value = kwargs[prop_name]
+                obj = cls._computed_indexes[prop_name].get(value)
+                if obj is None:
+                    raise KeyError(f"No {cls.__name__} found with {prop_name}={value}")
+                return obj
+
+        # Check subtype, type, then category indexes (most specific to least specific)
+        for cols, idx in itertools.chain(
+            cls._subtype_indexes.items(),
+            cls._type_indexes.items(),
+            cls._category_indexes.items()
+        ):
+            if set(cols) == set(kwargs.keys()):
+                key = tuple(kwargs[col] for col in cols)
+                obj = idx.get(key)
+                if obj is None:
+                    raise KeyError(f"No {cls.__name__} found with {kwargs}")
+                return obj
+
+        # No matching unique constraint
+        computed = list(cls._computed_indexes.keys())
+        raise ValueError(
+            f"No unique constraint for {set(kwargs.keys())}. "
+            f"Available: subtype={list(cls._subtype_indexes.keys())}, "
+            f"type={list(cls._type_indexes.keys())}, "
+            f"category={list(cls._category_indexes.keys())}"
+            + (f", computed={computed}" if computed else "")
+        )
+
+    @classmethod
+    def filter(cls, **kwargs):
+        """Filter objects by attributes (linear search through in-memory objects).
+
+        Use .get() for unique lookups with indexes for better performance.
+
+        Args:
+            **kwargs: Attribute values to filter by
+
+        Returns:
+            List of matching objects
+
+        Example:
+            active_users = User.filter(status="active")
+            recent_tasks = Task.filter(status="pending", priority="high")
+        """
+        if not kwargs:
+            return cls.all()
+
+        return [
+            obj for obj in cls.all()
+            if all(getattr(obj, k, None) == v for k, v in kwargs.items())
+        ]
+
     def _get_attr(self) -> dict:
         """Extract attribute dict for database storage."""
         # Use mode='python' to preserve Decimal objects (don't serialize to JSON yet)
