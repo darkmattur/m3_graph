@@ -249,7 +249,7 @@ class TestBacklinks:
             title: str
             author: Link[Author, "books"]
 
-        await graph.db_maintain()
+        await graph.maintain()
 
         author = Author(source="test", name="Jane Doe")
         await author.insert()
@@ -282,7 +282,7 @@ class TestBacklinks:
             title: str
             author: Link[Author, "books"]
 
-        await graph.db_maintain()
+        await graph.maintain()
 
         author = Author(source="test", name="Jane Doe")
         await author.insert()
@@ -304,7 +304,7 @@ class TestBacklinks:
             title: str
             author: Link[Author, "books"]
 
-        await graph.db_maintain()
+        await graph.maintain()
 
         author = Author(source="test", name="Jane Doe")
         await author.insert()
@@ -340,7 +340,7 @@ class TestBacklinks:
             title: str
             author: Link[Author, "books"]
 
-        await graph.db_maintain()
+        await graph.maintain()
 
         author = Author(source="test", name="Jane Doe")
         await author.insert()
@@ -373,7 +373,7 @@ class TestBacklinks:
             title: str
             author: Link[Author, "books"]
 
-        await graph.db_maintain()
+        await graph.maintain()
 
         author1 = Author(source="test", name="Author 1")
         author2 = Author(source="test", name="Author 2")
@@ -420,7 +420,7 @@ class TestBacklinks:
             title: str
             author: Link[Author, "books"]
 
-        await graph.db_maintain()
+        await graph.maintain()
 
         author = Author(source="test", name="Jane Doe")
         await author.insert()
@@ -584,7 +584,7 @@ class TestBidirectionalRelationships:
             title: str
             author: Link[Author, "books"]
 
-        await graph.db_maintain()
+        await graph.maintain()
 
         author = Author(source="test", name="Jane Doe")
         await author.insert()
@@ -616,7 +616,7 @@ class TestBidirectionalRelationships:
             title: str
             author: Link[Author, "books"]
 
-        await graph.db_maintain()
+        await graph.maintain()
 
         author = Author(source="test", name="Jane Doe")
         await author.insert()
@@ -652,7 +652,7 @@ class TestBidirectionalRelationships:
             title: str
             author: Link[Author, "books"]
 
-        await graph.db_maintain()
+        await graph.maintain()
 
         author1 = Author(source="test", name="Author 1")
         author2 = Author(source="test", name="Author 2")
@@ -754,7 +754,7 @@ class TestComplexRelationships:
 
         # Delete author directly from database
         await graph._conn.execute(
-            f"DELETE FROM {graph._name}.object WHERE id = %(author_id)s",
+            f"DELETE FROM {graph._schema}.object WHERE id = %(author_id)s",
             author_id=author.id
         )
 
@@ -782,7 +782,7 @@ class TestComplexRelationships:
             title: str
             author: Link[Author, "books"]
 
-        await graph.db_maintain()
+        await graph.maintain()
 
         # Session 1: Create
         author = Author(source="test", name="Jane Doe")
@@ -1031,7 +1031,7 @@ class TestCascadeDelete:
             title: str
             author: Link[Author, "books"]
 
-        await graph.db_maintain()
+        await graph.maintain()
 
         author = Author(source="test", name="Jane Doe")
         await author.insert()

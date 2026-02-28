@@ -76,7 +76,7 @@ async def graph(db_connection: DBConn, test_schema: str) -> AsyncGenerator[TestG
     The graph is fully initialized with tables, triggers, and functions.
     """
     # Create the graph and its schema
-    g = await TestGraph.db_create(db_connection, name=test_schema)
+    g = await TestGraph.create(db_connection, name=test_schema)
 
     yield g
 

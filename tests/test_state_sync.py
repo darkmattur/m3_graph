@@ -271,7 +271,7 @@ class TestDatabaseAsSourceOfTruth:
 
         # Modify directly in database
         await graph._conn.execute(
-            f"UPDATE {graph._name}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(asset_id)s",
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(asset_id)s",
             asset_id=asset_id
         )
 
@@ -296,7 +296,7 @@ class TestDatabaseAsSourceOfTruth:
         # Insert directly via database
         result = await graph._conn.query(
             f"""
-            INSERT INTO {graph._name}.object (category, type, subtype, attr, source)
+            INSERT INTO {graph._schema}.object (category, type, subtype, attr, source)
             VALUES ('financial', 'asset', 'asset', %(attr)s, 'test')
             RETURNING id
             """,
@@ -330,7 +330,7 @@ class TestDatabaseAsSourceOfTruth:
 
         # Delete asset1 directly from database
         await graph._conn.execute(
-            f"DELETE FROM {graph._name}.object WHERE id = %(asset1_id)s",
+            f"DELETE FROM {graph._schema}.object WHERE id = %(asset1_id)s",
             asset1_id=asset1_id
         )
 
@@ -360,7 +360,7 @@ class TestDatabaseAsSourceOfTruth:
 
         # Update directly in database
         await graph._conn.execute(
-            f"UPDATE {graph._name}.object SET attr = jsonb_set(attr, '{{price}}', '500.0') WHERE id = %(asset_id)s",
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '500.0') WHERE id = %(asset_id)s",
             asset_id=asset_id
         )
 
@@ -394,7 +394,7 @@ class TestStaleData:
 
         # Modify directly in database
         await graph._conn.execute(
-            f"UPDATE {graph._name}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(asset_id)s",
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(asset_id)s",
             asset_id=asset_id
         )
 
@@ -421,7 +421,7 @@ class TestStaleData:
 
         # Simulate external modification
         await graph._conn.execute(
-            f"UPDATE {graph._name}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(asset_id)s",
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(asset_id)s",
             asset_id=asset_id
         )
 
@@ -497,7 +497,7 @@ class TestConsistency:
 
         # Modify ETH directly in database
         await graph._conn.execute(
-            f"UPDATE {graph._name}.object SET attr = jsonb_set(attr, '{{price}}', '75.0') WHERE id = %(eth_id)s",
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '75.0') WHERE id = %(eth_id)s",
             eth_id=eth.id
         )
 
@@ -605,7 +605,7 @@ class TestConcurrentModifications:
         # Simulate another session loaded original state and modified
         # (We simulate by updating DB directly)
         await graph._conn.execute(
-            f"UPDATE {graph._name}.object SET attr = jsonb_set(attr, '{{price}}', '300.0') WHERE id = %(asset_id)s",
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '300.0') WHERE id = %(asset_id)s",
             asset_id=asset.id
         )
 
@@ -638,7 +638,7 @@ class TestConcurrentModifications:
 
         # Simulate external update to volume
         await graph._conn.execute(
-            f"UPDATE {graph._name}.object SET attr = jsonb_set(attr, '{{volume}}', '2000.0') WHERE id = %(asset_id)s",
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{volume}}', '2000.0') WHERE id = %(asset_id)s",
             asset_id=asset.id
         )
 
@@ -707,7 +707,7 @@ class TestConcurrentModificationDetection:
 
         # External modification
         await graph._conn.execute(
-            f"UPDATE {graph._name}.object SET attr = jsonb_set(attr, '{{price}}', '500.0') WHERE id = %(id)s",
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '500.0') WHERE id = %(id)s",
             id=asset_id
         )
 
@@ -738,7 +738,7 @@ class TestConcurrentModificationDetection:
 
         # Session 2: Delete the object (simulate by direct DB delete)
         await graph._conn.execute(
-            f"DELETE FROM {graph._name}.object WHERE id = %(id)s",
+            f"DELETE FROM {graph._schema}.object WHERE id = %(id)s",
             id=asset_id
         )
 
@@ -849,7 +849,7 @@ class TestConcurrentModificationDetection:
 
         # Modify database directly
         await graph._conn.execute(
-            f"UPDATE {graph._name}.object SET attr = jsonb_set(attr, '{{price}}', '500.0') WHERE id = %(id)s",
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '500.0') WHERE id = %(id)s",
             id=asset_id
         )
 
@@ -883,7 +883,7 @@ class TestReloadPatterns:
 
         # Modify asset1 in database
         await graph._conn.execute(
-            f"UPDATE {graph._name}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(id)s",
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(id)s",
             id=asset1.id
         )
 

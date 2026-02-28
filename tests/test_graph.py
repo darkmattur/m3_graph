@@ -24,10 +24,10 @@ class TestGraph:
         class MyGraph(Graph):
             pass
 
-        graph = await MyGraph.db_create(db_connection, name=test_schema)
+        graph = await MyGraph.create(db_connection, name=test_schema)
 
         assert graph is not None
-        assert graph._name == test_schema
+        assert graph._schema == test_schema
         assert graph._conn is db_connection
         assert isinstance(graph.registry, dict)
         assert len(graph.registry) == 0
@@ -268,8 +268,8 @@ class TestGraph:
             pass
 
         # Create two graphs with different schemas
-        g1 = await Graph1.db_create(db_connection, name="schema1")
-        g2 = await Graph2.db_create(db_connection, name="schema2")
+        g1 = await Graph1.create(db_connection, name="schema1")
+        g2 = await Graph2.create(db_connection, name="schema2")
 
         # Define classes for each graph
         class Asset1(g1.DBObject):
@@ -373,13 +373,13 @@ class TestGraph:
         # Subtype should be registered
         assert "electronic" in graph.__class__.subtypes
 
-    async def test_graph_db_create_creates_tables(self, db_connection, test_schema):
-        """Test that db_create creates all necessary tables."""
+    async def test_graph_create_creates_tables(self, db_connection, test_schema):
+        """Test that create creates all necessary tables."""
 
         class MyGraph(Graph):
             pass
 
-        await MyGraph.db_create(db_connection, name=test_schema)
+        await MyGraph.create(db_connection, name=test_schema)
 
         # Verify tables exist
         result = await db_connection.query(

@@ -35,7 +35,7 @@ class TestDatabaseTriggers:
         # Register relationship metadata
         await graph._conn.execute(
             f"""
-            INSERT INTO {graph._name}.meta_relationship (category, type, subtype, forward, back)
+            INSERT INTO {graph._schema}.meta_relationship (category, type, subtype, forward, back)
             VALUES ('test', 'book', 'book', %(forward)s, %(back)s)
             ON CONFLICT (category, type, subtype) DO UPDATE SET forward = EXCLUDED.forward, back = EXCLUDED.back
             """,
@@ -76,7 +76,7 @@ class TestDatabaseTriggers:
         # Register relationship metadata
         await graph._conn.execute(
             f"""
-            INSERT INTO {graph._name}.meta_relationship (category, type, subtype, forward, back)
+            INSERT INTO {graph._schema}.meta_relationship (category, type, subtype, forward, back)
             VALUES ('test', 'book', 'book', %(forward)s, %(back)s)
             ON CONFLICT (category, type, subtype) DO UPDATE SET forward = EXCLUDED.forward, back = EXCLUDED.back
             """,
@@ -126,7 +126,7 @@ class TestDatabaseTriggers:
         # Register relationship metadata
         await graph._conn.execute(
             f"""
-            INSERT INTO {graph._name}.meta_relationship (category, type, subtype, forward, back)
+            INSERT INTO {graph._schema}.meta_relationship (category, type, subtype, forward, back)
             VALUES ('test', 'book', 'book', %(forward)s, %(back)s)
             ON CONFLICT (category, type, subtype) DO UPDATE SET forward = EXCLUDED.forward, back = EXCLUDED.back
             """,
@@ -170,7 +170,7 @@ class TestHistoryTracking:
 
         # Check history table
         history = await graph._conn.query(
-            f"SELECT * FROM {graph._name}.history WHERE id = %(id)s",
+            f"SELECT * FROM {graph._schema}.history WHERE id = %(id)s",
             id=asset.id
         )
 
@@ -196,7 +196,7 @@ class TestHistoryTracking:
 
         # Check history - should have 2 entries
         history = await graph._conn.query(
-            f"SELECT * FROM {graph._name}.history WHERE id = %(id)s ORDER BY validity",
+            f"SELECT * FROM {graph._schema}.history WHERE id = %(id)s ORDER BY validity",
             id=asset.id
         )
 
@@ -227,7 +227,7 @@ class TestHistoryTracking:
 
         # Check history - validity should be closed
         history = await graph._conn.query(
-            f"SELECT * FROM {graph._name}.history WHERE id = %(id)s",
+            f"SELECT * FROM {graph._schema}.history WHERE id = %(id)s",
             id=asset_id
         )
 
@@ -250,7 +250,7 @@ class TestHistoryTracking:
 
         # Should still have only 1 history entry
         history = await graph._conn.query(
-            f"SELECT * FROM {graph._name}.history WHERE id = %(id)s",
+            f"SELECT * FROM {graph._schema}.history WHERE id = %(id)s",
             id=asset.id
         )
 
@@ -277,7 +277,7 @@ class TestHistoryTracking:
 
         # Check history preserves all types
         history = await graph._conn.query(
-            f"SELECT * FROM {graph._name}.history WHERE id = %(id)s",
+            f"SELECT * FROM {graph._schema}.history WHERE id = %(id)s",
             id=obj.id
         )
 
@@ -532,7 +532,7 @@ class TestDatabaseIntegrity:
 
         # Delete author directly from DB (bypassing ORM)
         await graph._conn.execute(
-            f"DELETE FROM {graph._name}.object WHERE id = %(id)s",
+            f"DELETE FROM {graph._schema}.object WHERE id = %(id)s",
             id=author.id
         )
 
@@ -584,7 +584,7 @@ class TestDataIntegrity:
 
         # Check database representation
         rows = await graph._conn.query(
-            f"SELECT id, attr FROM {graph._name}.object WHERE id IN (%(id1)s, %(id2)s) ORDER BY id",
+            f"SELECT id, attr FROM {graph._schema}.object WHERE id IN (%(id1)s, %(id2)s) ORDER BY id",
             id1=item1.id,
             id2=item2.id
         )
@@ -606,7 +606,7 @@ class TestDataIntegrity:
 
         # Verify description is in JSONB
         row = await graph._conn.query(
-            f"SELECT attr FROM {graph._name}.object WHERE id = %(id)s",
+            f"SELECT attr FROM {graph._schema}.object WHERE id = %(id)s",
             id=item.id
         )
         assert 'description' in row[0]['attr']
@@ -617,7 +617,7 @@ class TestDataIntegrity:
 
         # Should be removed from JSONB
         row = await graph._conn.query(
-            f"SELECT attr FROM {graph._name}.object WHERE id = %(id)s",
+            f"SELECT attr FROM {graph._schema}.object WHERE id = %(id)s",
             id=item.id
         )
         assert 'description' not in row[0]['attr']
@@ -640,7 +640,7 @@ class TestDataIntegrity:
 
         # Check JSONB - category_obj_id should be present with null value
         row = await graph._conn.query(
-            f"SELECT attr FROM {graph._name}.object WHERE id = %(id)s",
+            f"SELECT attr FROM {graph._schema}.object WHERE id = %(id)s",
             id=item.id
         )
         # According to _get_attr, None values are filtered out unless it's a _id field
@@ -662,7 +662,7 @@ class TestDataIntegrity:
 
         # Verify excluded attr not in database
         row = await graph._conn.query(
-            f"SELECT attr FROM {graph._name}.object WHERE id = %(id)s",
+            f"SELECT attr FROM {graph._schema}.object WHERE id = %(id)s",
             id=cache.id
         )
         assert '_cached_at' not in row[0]['attr']
@@ -747,7 +747,7 @@ class TestDataIntegrity:
 
         # Verify in database
         row = await graph._conn.query(
-            f"SELECT attr FROM {graph._name}.object WHERE id = %(id)s",
+            f"SELECT attr FROM {graph._schema}.object WHERE id = %(id)s",
             id=container.id
         )
         assert row[0]['attr']['items'] == []
@@ -774,7 +774,7 @@ class TestDataIntegrity:
 
         # Private fields (starting with _) are excluded by Pydantic model_dump
         row = await graph._conn.query(
-            f"SELECT attr FROM {graph._name}.object WHERE id = %(id)s",
+            f"SELECT attr FROM {graph._schema}.object WHERE id = %(id)s",
             id=item.id
         )
         assert '_internal_id' not in row[0]['attr']  # Not persisted
@@ -805,7 +805,7 @@ class TestDataIntegrity:
 
         # Check that books_ids is not in JSONB (managed by triggers)
         row = await graph._conn.query(
-            f"SELECT attr FROM {graph._name}.object WHERE id = %(id)s",
+            f"SELECT attr FROM {graph._schema}.object WHERE id = %(id)s",
             id=author.id
         )
         assert 'books_ids' not in row[0]['attr']
@@ -915,7 +915,7 @@ class TestDataIntegrity:
 
         # Check history
         history = await graph._conn.query(
-            f"SELECT * FROM {graph._name}.history WHERE id = %(id)s",
+            f"SELECT * FROM {graph._schema}.history WHERE id = %(id)s",
             id=obj.id
         )
 
