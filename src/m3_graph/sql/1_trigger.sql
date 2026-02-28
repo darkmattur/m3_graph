@@ -55,7 +55,7 @@ BEGIN
   -- mapping for OLD type (if update)
   IF TG_OP = 'UPDATE' THEN
     SELECT mr.forward INTO m_old
-    FROM {name}.meta_relationship mr
+    FROM {name}.meta mr
     WHERE mr.category = OLD.category AND mr.type = OLD.type AND mr.subtype = OLD.subtype;
 
     IF m_old IS NULL THEN
@@ -67,7 +67,7 @@ BEGIN
 
   -- mapping for NEW type
   SELECT mr.forward INTO m_new
-  FROM {name}.meta_relationship mr
+  FROM {name}.meta mr
   WHERE mr.category = NEW.category AND mr.type = NEW.type AND mr.subtype = NEW.subtype;
 
   IF m_new IS NULL THEN
@@ -254,7 +254,7 @@ BEGIN
   END IF;
 
   SELECT mr.forward INTO m
-  FROM {name}.meta_relationship mr
+  FROM {name}.meta mr
   WHERE mr.category = OLD.category AND mr.type = OLD.type AND mr.subtype = OLD.subtype;
 
   IF m IS NULL THEN

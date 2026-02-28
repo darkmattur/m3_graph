@@ -33,15 +33,18 @@ CREATE TABLE IF NOT EXISTS {name}.history (
 CREATE INDEX IF NOT EXISTS idx_history_attr_gin ON {name}.history USING gin (attr);
 CREATE INDEX IF NOT EXISTS idx_history_deleted ON {name}.history (deleted);
 
--- Relationship metadata
+-- Type metadata (relationships and inheritance)
 
-CREATE TABLE IF NOT EXISTS {name}.meta_relationship (
+CREATE TABLE IF NOT EXISTS {name}.meta (
   category TEXT NOT NULL,
   type TEXT NOT NULL,
   subtype TEXT NOT NULL,
   forward JSONB,
   back TEXT[],
+  parent_types TEXT[] NOT NULL DEFAULT '{}'::TEXT[],
+  descendant_types TEXT[] NOT NULL DEFAULT '{}'::TEXT[],
   PRIMARY KEY (category, type, subtype)
 );
 
-CREATE INDEX IF NOT EXISTS idx_meta_relationship_gin ON {name}.meta_relationship USING gin (forward);
+CREATE INDEX IF NOT EXISTS idx_meta_gin ON {name}.meta USING gin (forward);
+CREATE INDEX IF NOT EXISTS idx_meta_descendants_gin ON {name}.meta USING gin (descendant_types);

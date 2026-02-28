@@ -124,9 +124,9 @@ class TestForwardLinks:
         # Create unsaved author
         author = Author(source="test", name="Jane Doe")
 
-        # Should raise error
-        with pytest.raises(ValueError, match="unsaved"):
-            Book(source="test", title="Test Book", author=author)
+        # Should allow unsaved object
+        book = Book(source="test", title="Test Book", author=author)
+        assert book.author.name == "Jane Doe"
 
     async def test_forward_link_setter(self, graph):
         """Test forward link property setter."""
@@ -154,8 +154,8 @@ class TestForwardLinks:
         assert book.author_id == author2.id
         assert book.author.name == "Author 2"
 
-    async def test_forward_link_setter_rejects_unsaved(self, graph):
-        """Test that relationship setter rejects unsaved objects."""
+    async def test_forward_link_setter_allows_unsaved(self, graph):
+        """Test that relationship setter allows unsaved objects."""
         class Author(graph.DBObject):
             category = "test"
             type = "author"
@@ -173,11 +173,21 @@ class TestForwardLinks:
         book = Book(source="test", title="Book", author=saved_author)
         await book.insert()
 
-        # Try to set to unsaved author
+        # Set to unsaved author
         unsaved_author = Author(source="test", name="Unsaved")
+        book.author = unsaved_author
 
-        with pytest.raises(ValueError, match="unsaved"):
-            book.author = unsaved_author
+        # Should be accessible
+        assert book.author.name == "Unsaved"
+
+        # Update with unsaved refs should fail
+        with pytest.raises(ValueError, match="unsaved references"):
+            await book.update()
+
+        # Upsert should auto-save the unsaved author
+        await book.upsert()
+        assert unsaved_author.id is not None
+        assert book.author_id == unsaved_author.id
 
     async def test_forward_link_traversal_preserves_identity(self, graph):
         """Test that traversing forward links returns same Python instance."""

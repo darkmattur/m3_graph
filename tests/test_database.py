@@ -35,7 +35,7 @@ class TestDatabaseTriggers:
         # Register relationship metadata
         await graph._conn.execute(
             f"""
-            INSERT INTO {graph._schema}.meta_relationship (category, type, subtype, forward, back)
+            INSERT INTO {graph._schema}.meta (category, type, subtype, forward, back)
             VALUES ('test', 'book', 'book', %(forward)s, %(back)s)
             ON CONFLICT (category, type, subtype) DO UPDATE SET forward = EXCLUDED.forward, back = EXCLUDED.back
             """,
@@ -76,7 +76,7 @@ class TestDatabaseTriggers:
         # Register relationship metadata
         await graph._conn.execute(
             f"""
-            INSERT INTO {graph._schema}.meta_relationship (category, type, subtype, forward, back)
+            INSERT INTO {graph._schema}.meta (category, type, subtype, forward, back)
             VALUES ('test', 'book', 'book', %(forward)s, %(back)s)
             ON CONFLICT (category, type, subtype) DO UPDATE SET forward = EXCLUDED.forward, back = EXCLUDED.back
             """,
@@ -126,7 +126,7 @@ class TestDatabaseTriggers:
         # Register relationship metadata
         await graph._conn.execute(
             f"""
-            INSERT INTO {graph._schema}.meta_relationship (category, type, subtype, forward, back)
+            INSERT INTO {graph._schema}.meta (category, type, subtype, forward, back)
             VALUES ('test', 'book', 'book', %(forward)s, %(back)s)
             ON CONFLICT (category, type, subtype) DO UPDATE SET forward = EXCLUDED.forward, back = EXCLUDED.back
             """,
@@ -371,8 +371,8 @@ class TestErrorHandling:
         with pytest.raises(ValueError, match="parent is required"):
             child.parent = None
 
-    async def test_assigning_unsaved_object_raises_error(self, graph):
-        """Test that assigning unsaved object to relationship raises error."""
+    async def test_assigning_unsaved_object_allowed(self, graph):
+        """Test that assigning unsaved object to relationship is allowed and auto-saved on upsert."""
         class Author(graph.DBObject):
             category = "test"
             type = "author"
@@ -387,9 +387,169 @@ class TestErrorHandling:
         # Create unsaved author
         author = Author(source="test", name="Jane")
 
-        # Try to assign unsaved object
-        with pytest.raises(ValueError, match="unsaved"):
-            Book(source="test", title="Book", author=author)
+        # Should allow unsaved object
+        book = Book(source="test", title="Book", author=author)
+
+        # Author should be accessible
+        assert book.author.name == "Jane"
+        assert author.id is None  # Not yet saved
+
+        # Insert with unsaved refs should fail
+        with pytest.raises(ValueError, match="unsaved references"):
+            await book.insert()
+
+        # Upsert should auto-save author
+        await book.upsert()
+
+        assert author.id is not None  # Author was auto-saved
+        assert book.author_id == author.id
+
+    async def test_insert_rejects_unsaved_references(self, graph):
+        """Test that insert() explicitly rejects objects with unsaved references."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author]
+
+        author = Author(source="test", name="Jane")
+        book = Book(source="test", title="Book", author=author)
+
+        # Should explicitly reject
+        with pytest.raises(ValueError, match="Cannot insert object with unsaved references: author"):
+            await book.insert()
+
+    async def test_update_rejects_unsaved_references(self, graph):
+        """Test that update() explicitly rejects objects with unsaved references."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author]
+
+        # Create and save with valid author
+        author1 = Author(source="test", name="Author 1")
+        await author1.insert()
+
+        book = Book(source="test", title="Book", author=author1)
+        await book.insert()
+
+        # Change to unsaved author
+        author2 = Author(source="test", name="Author 2")
+        book.author = author2
+
+        # Update should reject
+        with pytest.raises(ValueError, match="Cannot update object with unsaved references: author"):
+            await book.update()
+
+    async def test_upsert_cascading_save_multi_level(self, graph):
+        """Test that upsert() cascades through multiple levels of unsaved references."""
+        class Publisher(graph.DBObject):
+            category = "test"
+            type = "publisher"
+            name: str
+
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+            publisher: Link[Publisher]
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author]
+
+        # Build entire graph in memory
+        publisher = Publisher(source="test", name="BigPub")
+        author = Author(source="test", name="Jane", publisher=publisher)
+        book = Book(source="test", title="Book", author=author)
+
+        # All unsaved
+        assert publisher.id is None
+        assert author.id is None
+        assert book.id is None
+
+        # Single upsert should cascade through all levels
+        await book.upsert()
+
+        # All should now be saved
+        assert publisher.id is not None
+        assert author.id is not None
+        assert book.id is not None
+        assert book.author_id == author.id
+        assert author.publisher_id == publisher.id
+
+    async def test_upsert_with_mix_of_saved_and_unsaved(self, graph):
+        """Test that upsert() handles mix of saved and unsaved references."""
+        class Category(graph.DBObject):
+            category = "test"
+            type = "category"
+            name: str
+
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+            category_obj: Link[Category]
+
+        # Save one category
+        saved_cat = Category(source="test", name="Saved")
+        await saved_cat.insert()
+
+        # Create item with saved reference
+        item = Item(source="test", name="Item", category_obj=saved_cat)
+        await item.insert()
+
+        # Change to unsaved reference
+        unsaved_cat = Category(source="test", name="Unsaved")
+        item.category_obj = unsaved_cat
+
+        # Upsert should save the unsaved category
+        await item.upsert()
+
+        assert unsaved_cat.id is not None
+        assert item.category_obj_id == unsaved_cat.id
+
+    async def test_unsaved_refs_cleared_after_upsert(self, graph):
+        """Test that _unsaved_refs is properly cleared after upsert."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author]
+
+        author = Author(source="test", name="Jane")
+        book = Book(source="test", title="Book", author=author)
+
+        # Should have unsaved ref
+        assert hasattr(book, '_unsaved_refs')
+        assert 'author' in book._unsaved_refs
+
+        await book.upsert()
+
+        # Should be cleared after upsert
+        assert len(book._unsaved_refs) == 0
+
+        # Second upsert should work without issues
+        book.title = "Updated Book"
+        await book.upsert()  # Should not fail
 
     async def test_invalid_type_for_field_raises_validation_error(self, graph):
         """Test that invalid type for field raises Pydantic validation error."""
@@ -926,3 +1086,527 @@ class TestDataIntegrity:
         assert hist['attr']['tags'] == ["a", "b"]
         assert hist['attr']['metadata'] == {"key": "value"}
         assert hist['attr']['active'] is True
+
+
+@pytest.mark.asyncio
+class TestTypeInheritance:
+    """Test type inheritance metadata tracking."""
+
+    async def test_register_type_with_no_parents(self, graph):
+        """Test registering a type with no parent types."""
+        class BaseType(graph.DBObject):
+            category = "test"
+            type = "base_unique_type"
+            name: str
+
+        await BaseType.maintain()
+
+        # Check meta table
+        result = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.meta WHERE type = 'base_unique_type'"
+        )
+
+        assert len(result) == 1
+        assert result[0]['type'] == "base_unique_type"
+        assert result[0]['subtype'] == "base_unique_type"
+        assert result[0]['parent_types'] == []
+        assert result[0]['descendant_types'] == ["base_unique_type"]
+
+    async def test_register_type_with_single_parent(self, graph):
+        """Test registering a type that inherits from another."""
+        class Animal(graph.DBObject):
+            category = "biology"
+            type = "animal"
+            name: str
+
+        class Dog(Animal):
+            type = "dog"
+            breed: str
+
+        await Animal.maintain()
+        await Dog.maintain()
+
+        # Check parent type
+        animal_meta = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.meta WHERE type = 'animal'"
+        )
+        assert animal_meta[0]['parent_types'] == []
+        assert animal_meta[0]['descendant_types'] == ["animal"]
+
+        # Check child type
+        dog_meta = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.meta WHERE type = 'dog'"
+        )
+        assert dog_meta[0]['parent_types'] == ["animal"]
+        assert dog_meta[0]['descendant_types'] == ["dog"]
+
+    async def test_register_type_with_multiple_inheritance_levels(self, graph):
+        """Test registering types with multiple inheritance levels."""
+        class Vehicle(graph.DBObject):
+            category = "transport"
+            type = "vehicle"
+            name: str
+
+        class Car(Vehicle):
+            type = "car"
+            doors: int
+
+        class SportsCar(Car):
+            type = "sports_car"
+            top_speed: int
+
+        await Vehicle.maintain()
+        await Car.maintain()
+        await SportsCar.maintain()
+
+        # Check grandchild type
+        sports_meta = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.meta WHERE type = 'sports_car'"
+        )
+
+        # Should include both immediate parent and grandparent
+        assert set(sports_meta[0]['parent_types']) == {"car", "vehicle"}
+        assert sports_meta[0]['descendant_types'] == ["sports_car"]
+
+    async def test_update_type_inheritance_on_maintain(self, graph):
+        """Test that calling maintain() updates inheritance metadata."""
+        class Base(graph.DBObject):
+            category = "test"
+            type = "base"
+            name: str
+
+        await Base.maintain()
+
+        # First check
+        result1 = await graph._conn.query(
+            f"SELECT parent_types FROM {graph._schema}.meta WHERE type = 'base'"
+        )
+        assert result1[0]['parent_types'] == []
+
+        # Call maintain again (should not error, just update)
+        await Base.maintain()
+
+        result2 = await graph._conn.query(
+            f"SELECT parent_types FROM {graph._schema}.meta WHERE type = 'base'"
+        )
+        assert result2[0]['parent_types'] == []
+
+    async def test_inheritance_with_different_categories(self, graph):
+        """Test that inheritance tracking works with different categories."""
+        class Entity(graph.DBObject):
+            category = "core"
+            type = "entity"
+            name: str
+
+        class Person(Entity):
+            category = "people"
+            type = "person"
+            age: int
+
+        await Entity.maintain()
+        await Person.maintain()
+
+        # Check that person has entity as parent despite different category
+        person_meta = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.meta WHERE type = 'person' AND category = 'people'"
+        )
+        assert "entity" in person_meta[0]['parent_types']
+
+    async def test_inheritance_metadata_separate_from_relationships(self, graph):
+        """Test that inheritance metadata doesn't interfere with relationship metadata."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author]
+
+        await Author.maintain()
+        await Book.maintain()
+
+        # Check that both relationship and inheritance data are present
+        book_meta = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.meta WHERE type = 'book'"
+        )
+
+        assert book_meta[0]['forward'] == {"author_id": None}
+        assert book_meta[0]['parent_types'] == []
+        assert book_meta[0]['descendant_types'] == ["book"]
+
+    async def test_subtype_differs_from_type_inheritance(self, graph):
+        """Test inheritance when subtype differs from type."""
+        class Animal(graph.DBObject):
+            category = "biology"
+            type = "animal"
+            subtype = "base_animal"
+            name: str
+
+        class Dog(Animal):
+            type = "dog"
+            subtype = "canine"
+            breed: str
+
+        await Animal.maintain()
+        await Dog.maintain()
+
+        dog_meta = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.meta WHERE type = 'dog' AND subtype = 'canine'"
+        )
+
+        assert dog_meta[0]['type'] == "dog"
+        assert dog_meta[0]['subtype'] == "canine"
+        assert "animal" in dog_meta[0]['parent_types']
+
+
+@pytest.mark.asyncio
+class TestSQLFunctions:
+    """Test SQL functions including fetch_object."""
+
+    async def test_fetch_object_single_root(self, graph):
+        """Test fetching a single object with no relationships."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+
+        item = Item(source="test", name="Widget")
+        await item.insert()
+
+        # Use SQL function to fetch
+        result = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.fetch_object(ARRAY[%(id)s]::bigint[])",
+            id=item.id
+        )
+
+        assert len(result) == 1
+        assert result[0]['id'] == item.id
+        assert result[0]['attr']['name'] == "Widget"
+
+    async def test_fetch_object_with_forward_relationship(self, graph):
+        """Test fetch_object traverses forward relationships."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author]
+
+        await Author.maintain()
+        await Book.maintain()
+
+        author = Author(source="test", name="Jane Doe")
+        await author.insert()
+
+        book = Book(source="test", title="Test Book", author=author)
+        await book.insert()
+
+        # Fetch starting from book, should get both book and author
+        result = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.fetch_object(ARRAY[%(id)s]::bigint[])",
+            id=book.id
+        )
+
+        ids = {r['id'] for r in result}
+        assert book.id in ids
+        assert author.id in ids
+        assert len(result) == 2
+
+    async def test_fetch_object_with_backlink_relationship(self, graph):
+        """Test fetch_object traverses backlink relationships."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+            books: Backlink['Book']
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author, "books"]
+
+        await Author.maintain()
+        await Book.maintain()
+
+        author = Author(source="test", name="Jane Doe")
+        await author.insert()
+
+        book1 = Book(source="test", title="Book 1", author=author)
+        book2 = Book(source="test", title="Book 2", author=author)
+        await book1.insert()
+        await book2.insert()
+
+        # Fetch starting from author, should get author and both books
+        result = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.fetch_object(ARRAY[%(id)s]::bigint[])",
+            id=author.id
+        )
+
+        ids = {r['id'] for r in result}
+        assert author.id in ids
+        assert book1.id in ids
+        assert book2.id in ids
+        assert len(result) == 3
+
+    async def test_fetch_object_multiple_roots(self, graph):
+        """Test fetching multiple root objects."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+
+        item1 = Item(source="test", name="Item1")
+        item2 = Item(source="test", name="Item2")
+        await item1.insert()
+        await item2.insert()
+
+        # Fetch both items
+        result = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.fetch_object(ARRAY[%(id1)s, %(id2)s]::bigint[])",
+            id1=item1.id,
+            id2=item2.id
+        )
+
+        ids = {r['id'] for r in result}
+        assert item1.id in ids
+        assert item2.id in ids
+        assert len(result) == 2
+
+    async def test_fetch_object_deep_graph_traversal(self, graph):
+        """Test fetch_object traverses multi-level relationships."""
+        class Company(graph.DBObject):
+            category = "test"
+            type = "company"
+            name: str
+
+        class Department(graph.DBObject):
+            category = "test"
+            type = "department"
+            name: str
+            company: Link[Company]
+
+        class Employee(graph.DBObject):
+            category = "test"
+            type = "employee"
+            name: str
+            department: Link[Department]
+
+        await Company.maintain()
+        await Department.maintain()
+        await Employee.maintain()
+
+        company = Company(source="test", name="ACME Corp")
+        await company.insert()
+
+        dept = Department(source="test", name="Engineering", company=company)
+        await dept.insert()
+
+        emp = Employee(source="test", name="Alice", department=dept)
+        await emp.insert()
+
+        # Fetch from employee, should traverse to department and company
+        result = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.fetch_object(ARRAY[%(id)s]::bigint[])",
+            id=emp.id
+        )
+
+        ids = {r['id'] for r in result}
+        assert emp.id in ids
+        assert dept.id in ids
+        assert company.id in ids
+        assert len(result) == 3
+
+    async def test_fetch_object_circular_relationships(self, graph):
+        """Test fetch_object handles circular relationships without infinite loop."""
+        class PersonA(graph.DBObject):
+            category = "test"
+            type = "person_a"
+            name: str
+
+        class PersonB(graph.DBObject):
+            category = "test"
+            type = "person_b"
+            name: str
+            friend: Link[PersonA] | None = None
+
+        await PersonA.maintain()
+        await PersonB.maintain()
+
+        alice = PersonA(source="test", name="Alice")
+        bob = PersonB(source="test", name="Bob", friend=alice)
+
+        # Use upsert for cascading save
+        await bob.upsert()
+
+        # Fetch from bob, should get both alice and bob
+        result = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.fetch_object(ARRAY[%(id)s]::bigint[])",
+            id=bob.id
+        )
+
+        ids = {r['id'] for r in result}
+        assert alice.id in ids
+        assert bob.id in ids
+        assert len(result) == 2
+
+    async def test_fetch_object_with_null_relationships(self, graph):
+        """Test fetch_object handles null/optional relationships."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author] | None = None
+
+        await Book.maintain()
+
+        book = Book(source="test", title="Anonymous Book")
+        await book.insert()
+
+        # Should only fetch the book, no author
+        result = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.fetch_object(ARRAY[%(id)s]::bigint[])",
+            id=book.id
+        )
+
+        assert len(result) == 1
+        assert result[0]['id'] == book.id
+
+    async def test_fetch_object_excludes_disconnected_objects(self, graph):
+        """Test fetch_object only returns connected objects."""
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+
+        item1 = Item(source="test", name="Connected")
+        item2 = Item(source="test", name="Disconnected")
+        await item1.insert()
+        await item2.insert()
+
+        # Fetch only item1
+        result = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.fetch_object(ARRAY[%(id)s]::bigint[])",
+            id=item1.id
+        )
+
+        ids = {r['id'] for r in result}
+        assert item1.id in ids
+        assert item2.id not in ids
+        assert len(result) == 1
+
+    async def test_fetch_object_empty_array(self, graph):
+        """Test fetch_object with empty array returns nothing."""
+        result = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.fetch_object(ARRAY[]::bigint[])"
+        )
+
+        assert len(result) == 0
+
+    async def test_fetch_object_nonexistent_id(self, graph):
+        """Test fetch_object with non-existent ID returns empty."""
+        result = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.fetch_object(ARRAY[999999]::bigint[])"
+        )
+
+        assert len(result) == 0
+
+    async def test_fetch_object_preserves_all_attributes(self, graph):
+        """Test that fetch_object returns all object attributes correctly."""
+        from decimal import Decimal
+
+        class Product(graph.DBObject):
+            category = "test"
+            type = "product"
+            name: str
+            price: Decimal
+            tags: list[str]
+            metadata: dict
+
+        product = Product(
+            source="test",
+            name="Widget",
+            price=Decimal("19.99"),
+            tags=["new", "featured"],
+            metadata={"color": "blue", "size": "large"}
+        )
+        await product.insert()
+
+        result = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.fetch_object(ARRAY[%(id)s]::bigint[])",
+            id=product.id
+        )
+
+        assert len(result) == 1
+        attr = result[0]['attr']
+        assert attr['name'] == "Widget"
+        assert Decimal(str(attr['price'])) == Decimal("19.99")
+        assert attr['tags'] == ["new", "featured"]
+        assert attr['metadata'] == {"color": "blue", "size": "large"}
+
+    async def test_fetch_object_with_complex_graph(self, graph):
+        """Test fetch_object on a more complex object graph."""
+        class Team(graph.DBObject):
+            category = "test"
+            type = "team"
+            name: str
+            members: Backlink['Member']
+
+        class Member(graph.DBObject):
+            category = "test"
+            type = "member"
+            name: str
+            team: Link[Team, "members"]
+            tasks: Backlink['Task']
+
+        class Task(graph.DBObject):
+            category = "test"
+            type = "task"
+            title: str
+            assignee: Link[Member, "tasks"]
+
+        await Team.maintain()
+        await Member.maintain()
+        await Task.maintain()
+
+        team = Team(source="test", name="DevTeam")
+        await team.insert()
+
+        member1 = Member(source="test", name="Alice", team=team)
+        member2 = Member(source="test", name="Bob", team=team)
+        await member1.insert()
+        await member2.insert()
+
+        task1 = Task(source="test", title="Task 1", assignee=member1)
+        task2 = Task(source="test", title="Task 2", assignee=member1)
+        task3 = Task(source="test", title="Task 3", assignee=member2)
+        await task1.insert()
+        await task2.insert()
+        await task3.insert()
+
+        # Fetch from team root, should get everything
+        result = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.fetch_object(ARRAY[%(id)s]::bigint[])",
+            id=team.id
+        )
+
+        ids = {r['id'] for r in result}
+        assert team.id in ids
+        assert member1.id in ids
+        assert member2.id in ids
+        assert task1.id in ids
+        assert task2.id in ids
+        assert task3.id in ids
+        assert len(result) == 6

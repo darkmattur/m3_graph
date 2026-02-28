@@ -12,7 +12,7 @@ WITH RECURSIVE graph AS (
 
   SELECT o2.id, o2.category, o2.type, o2.subtype, o2.attr
   FROM graph g
-  LEFT JOIN {name}.meta_relationship mr
+  LEFT JOIN {name}.meta mr
     ON mr.category = g.category
    AND mr.type     = g.type
    AND mr.subtype  = g.subtype

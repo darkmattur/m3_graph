@@ -396,4 +396,4 @@ class TestGraph:
 
         assert 'object' in table_names
         assert 'history' in table_names
-        assert 'meta_relationship' in table_names
+        assert 'meta' in table_names

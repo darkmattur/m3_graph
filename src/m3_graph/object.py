@@ -57,6 +57,9 @@ class DBObject(BaseModel):
     _computed_indexes: ClassVar[dict[str, dict]] = {}
     
     def __init__(self, **data):
+        # Track unsaved object references
+        unsaved_refs = {}
+
         # Handle relationship assignments during initialization
         for key in list(data.keys()):
             if key.endswith('_id') or key.endswith('_ids'):
@@ -73,12 +76,18 @@ class DBObject(BaseModel):
                     data[id_key] = None
                 elif isinstance(value, DBObject):
                     if value.id is None:
-                        raise ValueError(f"Cannot assign unsaved {key}")
-                    data[id_key] = int(value.id)
+                        # Store reference to unsaved object
+                        unsaved_refs[key] = value
+                        data[id_key] = None
+                    else:
+                        data[id_key] = int(value.id)
                 else:
                     data[id_key] = int(value)
 
         super().__init__(**data)
+
+        # Store unsaved references
+        self._unsaved_refs = unsaved_refs
 
         # Register instance if id is set
         if self.id:
@@ -148,13 +157,17 @@ class DBObject(BaseModel):
                 linked_type = unwrap_optional(link_info.target)
                 assert issubclass(linked_type, DBObject)
 
-                annotations[id_field] = int | None if nullable else int
-                if nullable:
-                    setattr(cls, id_field, None)
+                # Always allow None to support unsaved object references
+                annotations[id_field] = int | None
+                setattr(cls, id_field, None)
                 forward_rels[name] = (link_info.backlink, nullable)
 
-                def make_getter(field):
+                def make_getter(field, rel_name):
                     def getter(self):
+                        # Check for unsaved reference first
+                        if hasattr(self, '_unsaved_refs') and rel_name in self._unsaved_refs:
+                            return self._unsaved_refs[rel_name]
+
                         foreign_key = getattr(self, field, None)
                         if foreign_key is None:
                             return None
@@ -167,22 +180,36 @@ class DBObject(BaseModel):
                             if not is_nullable:
                                 raise ValueError(f"{rel_name} is required and cannot be None")
                             setattr(self, field, None)
+                            # Clear unsaved reference
+                            if hasattr(self, '_unsaved_refs') and rel_name in self._unsaved_refs:
+                                del self._unsaved_refs[rel_name]
                         elif isinstance(value, DBObject):
                             if value.id is None:
-                                raise ValueError(f"Cannot assign unsaved DBObject to {rel_name}")
-                            # Backfill the registry if the object has an ID
-                            if value.id not in self.graph.registry:
-                                self.graph.registry[value.id] = value
-                                if hasattr(value, 'type') and value.type:
-                                    self.graph.registry_type[value.type][value.id] = value
-                            setattr(self, field, int(value.id))
+                                # Store unsaved object reference
+                                if not hasattr(self, '_unsaved_refs'):
+                                    self._unsaved_refs = {}
+                                self._unsaved_refs[rel_name] = value
+                                setattr(self, field, None)
+                            else:
+                                # Backfill the registry if the object has an ID
+                                if value.id not in self.graph.registry:
+                                    self.graph.registry[value.id] = value
+                                    if hasattr(value, 'type') and value.type:
+                                        self.graph.registry_type[value.type][value.id] = value
+                                setattr(self, field, int(value.id))
+                                # Clear unsaved reference
+                                if hasattr(self, '_unsaved_refs') and rel_name in self._unsaved_refs:
+                                    del self._unsaved_refs[rel_name]
                         elif isinstance(value, int):
                             setattr(self, field, value)
+                            # Clear unsaved reference
+                            if hasattr(self, '_unsaved_refs') and rel_name in self._unsaved_refs:
+                                del self._unsaved_refs[rel_name]
                         else:
                             raise ValueError(f"Cannot assign non-DBObject to {rel_name}")
                     return setter
 
-                setattr(cls, name, property(make_getter(id_field), make_setter(id_field, name, nullable)))
+                setattr(cls, name, property(make_getter(id_field, name), make_setter(id_field, name, nullable)))
 
             elif isinstance(link_info, BacklinkInfo):
                 ids_field = f"{name}_ids"
@@ -306,6 +333,14 @@ class DBObject(BaseModel):
         if self.id is not None:
             raise ValueError("Cannot insert object with existing id")
 
+        # Check for unsaved references - require explicit saving
+        if hasattr(self, '_unsaved_refs') and self._unsaved_refs:
+            unsaved_names = ', '.join(self._unsaved_refs.keys())
+            raise ValueError(
+                f"Cannot insert object with unsaved references: {unsaved_names}. "
+                f"Either save them first or use upsert() for automatic cascading save."
+            )
+
         self.id = await self.graph._insert(self)
 
     async def update(self):
@@ -313,10 +348,31 @@ class DBObject(BaseModel):
         if self.id is None:
             raise ValueError("Cannot update object without id")
 
+        # Check for unsaved references - require explicit saving
+        if hasattr(self, '_unsaved_refs') and self._unsaved_refs:
+            unsaved_names = ', '.join(self._unsaved_refs.keys())
+            raise ValueError(
+                f"Cannot update object with unsaved references: {unsaved_names}. "
+                f"Either save them first or use upsert() for automatic cascading save."
+            )
+
         await self.graph._update(self)
     
     async def upsert(self):
-        """Insert or update this object in the database."""
+        """Insert or update this object in the database.
+
+        Automatically upserts any unsaved related objects first.
+        """
+        # Upsert any unsaved related objects first (cascading save)
+        if hasattr(self, '_unsaved_refs') and self._unsaved_refs:
+            for rel_name, related_obj in list(self._unsaved_refs.items()):
+                await related_obj.upsert()
+                # Update the ID field
+                id_field = f"{rel_name}_id"
+                setattr(self, id_field, related_obj.id)
+                # Remove from unsaved refs
+                del self._unsaved_refs[rel_name]
+
         if self.id is None:
             await self.insert()
         else:
@@ -333,13 +389,17 @@ class DBObject(BaseModel):
 
     @classmethod
     async def _register_relationships(cls):
-        """Store relationship metadata in the database."""
+        """Store relationship and inheritance metadata in the database."""
         if not (hasattr(cls, 'category') and hasattr(cls, 'type') and hasattr(cls, 'subtype')):
             return
         if cls.category is None or cls.type is None or cls.subtype is None:
             return
-        if not cls._forward_rels and not cls._back_rels:
-            return
+
+        # Collect parent types from base classes
+        parent_types = []
+        for base in cls.__mro__[1:]:
+            if hasattr(base, 'type') and base.type and base.type != cls.type:
+                parent_types.append(base.type)
 
         # Convert forward_rels to use _id suffix for database storage
         # ORM stores: {"author": ("books", False)}
@@ -355,16 +415,21 @@ class DBObject(BaseModel):
 
         await cls.graph._conn.execute(
             f"""
-            INSERT INTO {cls.graph._schema}.meta_relationship (category, type, subtype, forward, back)
-            VALUES (%(category)s, %(type)s, %(subtype)s, %(forward)s, %(back)s)
+            INSERT INTO {cls.graph._schema}.meta (category, type, subtype, forward, back, parent_types, descendant_types)
+            VALUES (%(category)s, %(type)s, %(subtype)s, %(forward)s, %(back)s, %(parent_types)s, ARRAY[%(type)s])
             ON CONFLICT (category, type, subtype)
-            DO UPDATE SET forward = EXCLUDED.forward, back = EXCLUDED.back
+            DO UPDATE SET
+                forward = EXCLUDED.forward,
+                back = EXCLUDED.back,
+                parent_types = EXCLUDED.parent_types,
+                descendant_types = ARRAY[%(type)s]
             """,
             category=cls.category,
             type=cls.type,
             subtype=cls.subtype,
-            forward=forward_for_db,
+            forward=forward_for_db if forward_for_db else None,
             back=list(cls._back_rels) if cls._back_rels else None,
+            parent_types=parent_types if parent_types else [],
         )
 
     @classmethod
