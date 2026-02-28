@@ -195,7 +195,7 @@ Relationships are tracked via triggers and metadata tables, enabling automatic b
 ## Requirements
 
 - Python ≥3.10, <3.14
-- PostgreSQL ≥12
+- PostgreSQL ≥18
 - Pydantic ≥2.0
 - psycopg ≥3.1
 
