@@ -1,3 +1,5 @@
+import re
+import sys
 import itertools
 from typing import Type, get_type_hints, ClassVar, TYPE_CHECKING
 
@@ -8,6 +10,32 @@ from .link import LinkInfo, BacklinkInfo, extract_link_info
 
 if TYPE_CHECKING:
     from .graph import Graph
+
+
+def _parse_link_from_str(annotation: str) -> 'LinkInfo | BacklinkInfo | None':
+    """Parse a raw string annotation to extract LinkInfo or BacklinkInfo.
+
+    Used as a fallback when get_type_hints() fails because the referenced class
+    lives in a local (function) scope and cannot be resolved via module globals.
+    """
+    s = annotation.strip()
+    # Strip Optional / union-with-None wrappers
+    s = re.sub(r'\s*\|\s*None', '', s).strip()
+    s = re.sub(r'None\s*\|\s*', '', s).strip()
+    m = re.match(r'^Optional\[(.+)\]$', s)
+    if m:
+        s = m.group(1).strip()
+
+    # Link[Target] or Link[Target, "backlink"] or Link[Target, 'backlink']
+    m = re.match(r"^Link\[(\w+)(?:,\s*['\"](\w+)['\"]\s*)?\]$", s)
+    if m:
+        return LinkInfo(target=None, backlink=m.group(2))
+
+    # Backlink[Target]
+    if re.match(r'^Backlink\[(\w+)\]$', s):
+        return BacklinkInfo()
+
+    return None
 
 
 class DBObject(BaseModel):
@@ -122,12 +150,24 @@ class DBObject(BaseModel):
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
 
+        annotations: dict = getattr(cls, '__annotations__', {})
+
         try:
             type_hints = get_type_hints(cls, include_extras=True)
         except NameError:
-            # Fall back to raw annotations if forward references can't be resolved
+            # get_type_hints failed (likely due to forward refs to local-scope classes).
+            # Try evaluating each annotation individually so non-link fields still resolve.
+            module = sys.modules.get(cls.__module__, None)
+            globalns = vars(module) if module else {}
             type_hints = {}
-        annotations: dict = getattr(cls, '__annotations__', {})
+            for attr_name, annotation_str in annotations.items():
+                if not isinstance(annotation_str, str):
+                    type_hints[attr_name] = annotation_str
+                    continue
+                try:
+                    type_hints[attr_name] = eval(annotation_str, globalns)
+                except NameError:
+                    pass  # Unresolvable forward ref – will be parsed as string below
 
         # 1. Relationships
         forward_rels = {}
@@ -141,6 +181,10 @@ class DBObject(BaseModel):
             annotation = type_hints.get(name, annotations[name])
 
             link_info = extract_link_info(annotation)
+            # If the annotation couldn't be resolved (stays as a string due to a
+            # forward reference to a local-scope class), parse the string directly.
+            if link_info is None and isinstance(annotation, str):
+                link_info = _parse_link_from_str(annotation)
             if link_info is None:
                 continue
 
@@ -152,11 +196,19 @@ class DBObject(BaseModel):
             # Handle Links
             if isinstance(link_info, LinkInfo):
                 id_field = f"{name}_id"
-                nullable = is_optional(annotation)
+                if isinstance(annotation, str):
+                    nullable = bool(
+                        re.search(r'\|\s*None|None\s*\|', annotation)
+                        or annotation.startswith('Optional[')
+                    )
+                else:
+                    nullable = is_optional(annotation)
 
-                linked_type = unwrap_optional(link_info.target)
-                print(linked_type)
-                assert issubclass(linked_type, DBObject)
+                # Only validate the target type when it has been resolved.
+                if link_info.target is not None:
+                    linked_type = unwrap_optional(link_info.target)
+                    print(linked_type)
+                    assert issubclass(linked_type, DBObject)
 
                 # Always allow None to support unsaved object references
                 annotations[id_field] = int | None

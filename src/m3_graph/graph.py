@@ -108,9 +108,12 @@ class Graph:
         return graph
     
     async def maintain(self):
-        await asyncio.gather(*(
-            db_cls.maintain() for db_cls in self.DBObject.__subclasses__()
-        ))
+        graph_cls = type(self)
+        # Use the registered type/subtype dicts so we cover the full hierarchy
+        # (not just direct subclasses) and avoid cross-test pollution via the
+        # persistent Python class hierarchy.
+        classes = set(graph_cls.types.values()) | set(graph_cls.subtypes.values())
+        await asyncio.gather(*(db_cls.maintain() for db_cls in classes))
     
     ####################################################################################
     # Internal Methods

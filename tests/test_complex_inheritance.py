@@ -84,6 +84,9 @@ class TestComplexInheritance:
             companies_led: Backlink[Company]
             senior_team: Backlink[SeniorManager]
 
+        # Register all types and relationships in the meta table
+        await graph.maintain()
+
         # Verify all types are registered
         assert "base_entity" in graph.__class__.types
         assert "person" in graph.__class__.types
@@ -339,6 +342,8 @@ class TestComplexInheritance:
             type = "target3"
             sources3: Backlink[Combined]
 
+        await graph.maintain()
+
         # Query meta table
         meta_rows = await db_connection.query(
             f"""
@@ -430,6 +435,8 @@ class TestComplexInheritance:
         class ChildC2(RootC):
             type = "child_c2"
             attr_c2: str
+
+        await graph.maintain()
 
         # Query meta table
         meta_rows = await db_connection.query(
