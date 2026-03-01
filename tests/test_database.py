@@ -1469,10 +1469,14 @@ class TestTypeInheritance:
         prev_cls = graph.DBObject
 
         for i in range(1, 9):
-            cls_dict = {'type': f'depth_{i}', '__module__': graph.DBObject.__module__}
+            cls_dict = {
+                'type': f'depth_{i}',
+                '__module__': graph.DBObject.__module__,
+                '__annotations__': {}
+            }
             if i == 1:
                 cls_dict['category'] = 'extreme_depth'
-                cls_dict['name'] = (str, ...)
+                cls_dict['__annotations__']['name'] = str
             cls = type(f'Depth{i}', (prev_cls,), cls_dict)
             classes.append(cls)
             prev_cls = cls
