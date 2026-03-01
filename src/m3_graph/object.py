@@ -600,11 +600,23 @@ class DBObject(BaseModel):
         if cls.category is None or cls.type is None or cls.subtype is None:
             return
 
-        # Collect parent types from base classes
+        # Collect parent types from base classes via MRO
         parent_types = []
         for base in cls.__mro__[1:]:
             if hasattr(base, 'type') and base.type and base.type != cls.type:
                 parent_types.append(base.type)
+
+        # Collect descendant types by checking ALL registered types in the graph
+        # A type T is a descendant of cls if cls.type appears in T's parent chain (MRO)
+        descendant_types = [cls.type]  # Always include self
+        for type_name, type_cls in cls.graph.__class__.types.items():
+            if type_name == cls.type:
+                continue  # Skip self (already included)
+            # Check if cls.type is in this type's ancestry
+            for base in type_cls.__mro__[1:]:
+                if hasattr(base, 'type') and base.type == cls.type:
+                    descendant_types.append(type_name)
+                    break
 
         # Convert forward_rels to use _id suffix for database storage
         # ORM stores: {"author": ("books", False)}
@@ -621,12 +633,13 @@ class DBObject(BaseModel):
         await cls.graph._conn.execute(
             f"""
             INSERT INTO {cls.graph._schema}.meta (category, type, subtype, forward, back, parent_types, descendant_types)
-            VALUES (%(category)s, %(type)s, %(subtype)s, %(forward)s, %(back)s, %(parent_types)s, ARRAY[%(type)s])
+            VALUES (%(category)s, %(type)s, %(subtype)s, %(forward)s, %(back)s, %(parent_types)s, %(descendant_types)s)
             ON CONFLICT (category, type, subtype)
             DO UPDATE SET
                 forward = EXCLUDED.forward,
                 back = EXCLUDED.back,
-                parent_types = EXCLUDED.parent_types
+                parent_types = EXCLUDED.parent_types,
+                descendant_types = EXCLUDED.descendant_types
             """,
             category=cls.category,
             type=cls.type,
@@ -634,29 +647,8 @@ class DBObject(BaseModel):
             forward=forward_for_db if forward_for_db else None,
             back=list(cls._back_rels) if cls._back_rels else None,
             parent_types=parent_types if parent_types else [],
+            descendant_types=descendant_types,
         )
-
-        if parent_types:
-            # Propagate this type and all its descendants to all ancestors
-            await cls.graph._conn.execute(
-                f"""
-                UPDATE {cls.graph._schema}.meta AS parent
-                SET descendant_types = (
-                    SELECT ARRAY(
-                        SELECT DISTINCT unnest(parent.descendant_types || child.descendant_types)
-                    )
-                    FROM {cls.graph._schema}.meta AS child
-                    WHERE child.category = %(category)s
-                      AND child.type = %(type)s
-                      AND child.subtype = %(subtype)s
-                )
-                WHERE parent.type = ANY(%(parent_types)s)
-                """,
-                category=cls.category,
-                type=cls.type,
-                subtype=cls.subtype,
-                parent_types=parent_types,
-            )
 
     @classmethod
     async def _create_unique_index(cls):
