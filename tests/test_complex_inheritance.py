@@ -166,6 +166,15 @@ class TestComplexInheritance:
         )
         await dev2.insert()
 
+        # Reload from database so DB-trigger-populated backlink arrays are visible.
+        await graph.load()
+        acme = graph.registry[acme.id]
+        ceo = graph.registry[ceo.id]
+        engineering = graph.registry[engineering.id]
+        vp_eng = graph.registry[vp_eng.id]
+        dev1 = graph.registry[dev1.id]
+        dev2 = graph.registry[dev2.id]
+
         # Verify relationships work correctly
         assert acme.ceo == ceo
         assert ceo in acme.ceo.companies_led

@@ -271,13 +271,15 @@ class DBObject(BaseModel):
                 annotations[ids_field] = list[int]
                 setattr(cls, ids_field, Field(default_factory=list, exclude=True))
 
-                def getter(self: DBObject):
-                    return [
-                        self.graph.registry[id_] for id_ in (getattr(self, ids_field, []) or [])
-                        if id_ in self.graph.registry
-                    ]
+                def make_backlink_getter(field):
+                    def getter(self: DBObject):
+                        return [
+                            self.graph.registry[id_] for id_ in (getattr(self, field, []) or [])
+                            if id_ in self.graph.registry
+                        ]
+                    return getter
 
-                setattr(cls, name, property(getter))
+                setattr(cls, name, property(make_backlink_getter(ids_field)))
 
         cls.__annotations__ = annotations
         cls._forward_rels = forward_rels
