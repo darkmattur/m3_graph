@@ -1268,7 +1268,9 @@ class TestTypeInheritance:
 
         assert dog_meta[0]['type'] == "dog"
         assert dog_meta[0]['subtype'] == "canine"
-        assert "animal" in dog_meta[0]['parent_types']
+        # parent_types contains subtypes of parents, not types
+        # Animal has subtype='base_animal', so that's what appears
+        assert "base_animal" in dog_meta[0]['parent_types']
 
     async def test_six_level_linear_inheritance_chain(self, graph):
         """Test very deep linear chain: L1 -> L2 -> L3 -> L4 -> L5 -> L6."""
@@ -1869,8 +1871,8 @@ class TestTypeInheritance:
         assert chain_meta[0]['descendant_types'] == ['chain']
 
         # ChainListing branch: on_chain -> erc_20, erc_1155
-        # Note: erc_20 has type='on_chain' with subtype='erc_20'
-        assert set(on_chain_meta[0]['descendant_types']) == {'on_chain', 'erc_1155'}
+        # descendant_types contains SUBTYPES, so 'erc_20' appears (not just 'on_chain')
+        assert set(on_chain_meta[0]['descendant_types']) == {'on_chain', 'erc_20', 'erc_1155'}
 
         # SmartContract branch: smart_contract -> evm_smart_contract
         # evm_smart_contract appears in the on_chain row's descendants (through ERC20's multiple inheritance)

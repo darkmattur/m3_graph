@@ -216,17 +216,18 @@ class TestComplexInheritance:
 
         # BaseEntity has no parents
         assert meta_by_type['base_entity']['parent_types'] == []
-        # BaseEntity should have ALL types as descendants (it's the root)
+        # BaseEntity should have ALL subtypes as descendants (it's the root)
+        # Note: Executive has subtype='executive' which differs from type='senior_manager'
         assert set(meta_by_type['base_entity']['descendant_types']) == {
             'base_entity', 'person', 'organization', 'employee', 'manager',
-            'company', 'senior_manager', 'department'
+            'company', 'senior_manager', 'department', 'executive'
         }
 
         # Person inherits from BaseEntity
         assert 'base_entity' in meta_by_type['person']['parent_types']
-        # Person should have itself + employee + manager + senior_manager as descendants
+        # Person should have itself + employee + manager + senior_manager + executive as descendants
         assert set(meta_by_type['person']['descendant_types']) == {
-            'person', 'employee', 'manager', 'senior_manager'
+            'person', 'employee', 'manager', 'senior_manager', 'executive'
         }
 
         # Organization inherits from BaseEntity
@@ -238,16 +239,16 @@ class TestComplexInheritance:
 
         # Employee inherits from Person (and transitively from BaseEntity)
         assert 'person' in meta_by_type['employee']['parent_types']
-        # Employee should have itself + manager + senior_manager as descendants
+        # Employee should have itself + manager + senior_manager + executive as descendants
         assert set(meta_by_type['employee']['descendant_types']) == {
-            'employee', 'manager', 'senior_manager'
+            'employee', 'manager', 'senior_manager', 'executive'
         }
 
         # Manager inherits from Employee
         assert 'employee' in meta_by_type['manager']['parent_types']
-        # Manager should have itself + senior_manager as descendants
+        # Manager should have itself + senior_manager + executive as descendants
         assert set(meta_by_type['manager']['descendant_types']) == {
-            'manager', 'senior_manager'
+            'manager', 'senior_manager', 'executive'
         }
 
         # Company inherits from Organization
