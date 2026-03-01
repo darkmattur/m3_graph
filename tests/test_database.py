@@ -1270,6 +1270,300 @@ class TestTypeInheritance:
         assert dog_meta[0]['subtype'] == "canine"
         assert "animal" in dog_meta[0]['parent_types']
 
+    async def test_six_level_linear_inheritance_chain(self, graph):
+        """Test very deep linear chain: L1 -> L2 -> L3 -> L4 -> L5 -> L6."""
+        class L1(graph.DBObject):
+            category = "deep"
+            type = "l1"
+            name: str
+
+        class L2(L1):
+            type = "l2"
+
+        class L3(L2):
+            type = "l3"
+
+        class L4(L3):
+            type = "l4"
+
+        class L5(L4):
+            type = "l5"
+
+        class L6(L5):
+            type = "l6"
+
+        await L1.maintain()
+        await L2.maintain()
+        await L3.maintain()
+        await L4.maintain()
+        await L5.maintain()
+        await L6.maintain()
+
+        metas = {}
+        for level in ['l1', 'l2', 'l3', 'l4', 'l5', 'l6']:
+            result = await graph._conn.query(
+                f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = '{level}'"
+            )
+            metas[level] = result[0]
+
+        # L1: root, all 6 as descendants
+        assert metas['l1']['parent_types'] == []
+        assert set(metas['l1']['descendant_types']) == {'l1', 'l2', 'l3', 'l4', 'l5', 'l6'}
+
+        # L2: 1 parent, 5 descendants (l2-l6)
+        assert set(metas['l2']['parent_types']) == {'l1'}
+        assert set(metas['l2']['descendant_types']) == {'l2', 'l3', 'l4', 'l5', 'l6'}
+
+        # L3: 2 parents, 4 descendants
+        assert set(metas['l3']['parent_types']) == {'l1', 'l2'}
+        assert set(metas['l3']['descendant_types']) == {'l3', 'l4', 'l5', 'l6'}
+
+        # L4: 3 parents, 3 descendants
+        assert set(metas['l4']['parent_types']) == {'l1', 'l2', 'l3'}
+        assert set(metas['l4']['descendant_types']) == {'l4', 'l5', 'l6'}
+
+        # L5: 4 parents, 2 descendants
+        assert set(metas['l5']['parent_types']) == {'l1', 'l2', 'l3', 'l4'}
+        assert set(metas['l5']['descendant_types']) == {'l5', 'l6'}
+
+        # L6: 5 parents, only itself
+        assert set(metas['l6']['parent_types']) == {'l1', 'l2', 'l3', 'l4', 'l5'}
+        assert metas['l6']['descendant_types'] == ['l6']
+
+    async def test_wide_tree_with_ten_siblings(self, graph):
+        """Test wide inheritance: one parent with 10 children."""
+        class Root(graph.DBObject):
+            category = "wide"
+            type = "root_wide"
+            name: str
+
+        children_classes = []
+        for i in range(10):
+            class_name = f"Child{i}"
+            child_cls = type(class_name, (Root,), {
+                'type': f'child_{i}',
+                '__module__': Root.__module__
+            })
+            children_classes.append(child_cls)
+
+        await Root.maintain()
+        for child_cls in children_classes:
+            await child_cls.maintain()
+
+        root_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'root_wide'"
+        )
+
+        expected_descendants = {'root_wide'}
+        for i in range(10):
+            expected_descendants.add(f'child_{i}')
+
+        assert set(root_meta[0]['descendant_types']) == expected_descendants
+
+        # Verify each child has only itself as descendant
+        for i in range(10):
+            child_meta = await graph._conn.query(
+                f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'child_{i}'"
+            )
+            assert child_meta[0]['parent_types'] == ['root_wide']
+            assert child_meta[0]['descendant_types'] == [f'child_{i}']
+
+    async def test_diamond_inheritance_pattern(self, graph):
+        """Test diamond: Base -> [Left, Right] -> Bottom."""
+        class Base(graph.DBObject):
+            category = "diamond"
+            type = "base_d"
+            name: str
+
+        class Left(Base):
+            type = "left"
+            left_attr: str
+
+        class Right(Base):
+            type = "right"
+            right_attr: str
+
+        class Bottom(Left):  # Only inherits from Left in Python
+            type = "bottom"
+            bottom_attr: str
+
+        await Base.maintain()
+        await Left.maintain()
+        await Right.maintain()
+        await Bottom.maintain()
+
+        base_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'base_d'"
+        )
+        left_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'left'"
+        )
+        right_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'right'"
+        )
+
+        # Base should have all 4
+        assert set(base_meta[0]['descendant_types']) == {'base_d', 'left', 'right', 'bottom'}
+
+        # Left should have left + bottom (bottom inherits from left)
+        assert set(left_meta[0]['descendant_types']) == {'left', 'bottom'}
+
+        # Right should have only itself (bottom doesn't inherit from right)
+        assert right_meta[0]['descendant_types'] == ['right']
+
+    async def test_binary_tree_structure(self, graph):
+        """Test complete binary tree: Root -> [L,R], L->[LL,LR], R->[RL,RR]."""
+        class Root(graph.DBObject):
+            category = "binary"
+            type = "root_bin"
+            name: str
+
+        class L(Root):
+            type = "l"
+
+        class R(Root):
+            type = "r"
+
+        class LL(L):
+            type = "ll"
+
+        class LR(L):
+            type = "lr"
+
+        class RL(R):
+            type = "rl"
+
+        class RR(R):
+            type = "rr"
+
+        await Root.maintain()
+        await L.maintain()
+        await R.maintain()
+        await LL.maintain()
+        await LR.maintain()
+        await RL.maintain()
+        await RR.maintain()
+
+        root_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'root_bin'"
+        )
+        l_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'l'"
+        )
+        r_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'r'"
+        )
+
+        # Root has all 7 nodes
+        assert set(root_meta[0]['descendant_types']) == {'root_bin', 'l', 'r', 'll', 'lr', 'rl', 'rr'}
+
+        # L branch has l, ll, lr
+        assert set(l_meta[0]['descendant_types']) == {'l', 'll', 'lr'}
+
+        # R branch has r, rl, rr
+        assert set(r_meta[0]['descendant_types']) == {'r', 'rl', 'rr'}
+
+    async def test_eight_level_deep_chain(self, graph):
+        """Test extreme depth: 8-level inheritance chain."""
+        classes = []
+        prev_cls = graph.DBObject
+
+        for i in range(1, 9):
+            cls_dict = {'type': f'depth_{i}', '__module__': graph.DBObject.__module__}
+            if i == 1:
+                cls_dict['category'] = 'extreme_depth'
+                cls_dict['name'] = (str, ...)
+            cls = type(f'Depth{i}', (prev_cls,), cls_dict)
+            classes.append(cls)
+            prev_cls = cls
+
+        for cls in classes:
+            await cls.maintain()
+
+        # Check depth_1 (root) has all 8
+        d1_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'depth_1'"
+        )
+        assert set(d1_meta[0]['descendant_types']) == {f'depth_{i}' for i in range(1, 9)}
+
+        # Check depth_4 (middle) has 5 descendants (4-8)
+        d4_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'depth_4'"
+        )
+        assert set(d4_meta[0]['descendant_types']) == {f'depth_{i}' for i in range(4, 9)}
+
+        # Check depth_8 (leaf) has only itself
+        d8_meta = await graph._conn.query(
+            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'depth_8'"
+        )
+        assert set(d8_meta[0]['parent_types']) == {f'depth_{i}' for i in range(1, 8)}
+        assert d8_meta[0]['descendant_types'] == ['depth_8']
+
+    async def test_mixed_depth_forest(self, graph):
+        """Test multiple independent trees with varying depths."""
+        # Tree 1: 3 levels
+        class T1_Root(graph.DBObject):
+            category = "forest"
+            type = "t1_root"
+            name: str
+
+        class T1_L2(T1_Root):
+            type = "t1_l2"
+
+        class T1_L3(T1_L2):
+            type = "t1_l3"
+
+        # Tree 2: 5 levels
+        class T2_Root(graph.DBObject):
+            category = "forest"
+            type = "t2_root"
+            name: str
+
+        class T2_L2(T2_Root):
+            type = "t2_l2"
+
+        class T2_L3(T2_L2):
+            type = "t2_l3"
+
+        class T2_L4(T2_L3):
+            type = "t2_l4"
+
+        class T2_L5(T2_L4):
+            type = "t2_l5"
+
+        # Tree 3: 1 level (standalone)
+        class T3_Root(graph.DBObject):
+            category = "forest"
+            type = "t3_root"
+            name: str
+
+        # Register all
+        for cls in [T1_Root, T1_L2, T1_L3, T2_Root, T2_L2, T2_L3, T2_L4, T2_L5, T3_Root]:
+            await cls.maintain()
+
+        t1_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 't1_root'"
+        )
+        t2_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 't2_root'"
+        )
+        t3_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 't3_root'"
+        )
+
+        # Tree 1: 3 descendants
+        assert set(t1_meta[0]['descendant_types']) == {'t1_root', 't1_l2', 't1_l3'}
+
+        # Tree 2: 5 descendants
+        assert set(t2_meta[0]['descendant_types']) == {'t2_root', 't2_l2', 't2_l3', 't2_l4', 't2_l5'}
+
+        # Tree 3: standalone
+        assert t3_meta[0]['descendant_types'] == ['t3_root']
+
+        # Verify no cross-contamination
+        assert all(d.startswith('t1_') for d in t1_meta[0]['descendant_types'])
+        assert all(d.startswith('t2_') for d in t2_meta[0]['descendant_types'])
+
 
 @pytest.mark.asyncio
 class TestSQLFunctions:
