@@ -165,6 +165,26 @@ class Graph:
             # Initialize the object
             cls(**obj_data)
     
+    def _propagate_backlinks(self, obj: DBObject):
+        """Update in-memory backlink arrays for all of obj's forward relationships.
+
+        Called after insert/update so that related objects' *_ids lists stay
+        consistent without requiring a full graph.load() round-trip.
+        """
+        for rel_name, (backlink_name, _) in obj._forward_rels.items():
+            if backlink_name is None:
+                continue
+            related_id = getattr(obj, f"{rel_name}_id", None)
+            if not related_id:
+                continue
+            related_obj = self.registry.get(related_id)
+            if related_obj is None:
+                continue
+            ids_field = f"{backlink_name}_ids"
+            current = getattr(related_obj, ids_field, None) or []
+            if obj.id not in current:
+                object.__setattr__(related_obj, ids_field, list(current) + [obj.id])
+
     async def _insert(self, obj: DBObject):
         """Insert new DBObject into database."""
         if obj.id is not None:
@@ -187,9 +207,10 @@ class Graph:
         if hasattr(obj, 'type') and obj.type:
             self.registry_type[obj.type][obj.id] = obj
         obj._update_indexes()
+        self._propagate_backlinks(obj)
 
         return obj.id
-    
+
     async def _update(self, obj: DBObject):
         """Update existing DBObject in database."""
         if obj.id is None:
@@ -208,6 +229,7 @@ class Graph:
             attr=obj._get_attr(),
             source=obj.source
         )
+        self._propagate_backlinks(obj)
     
     async def _delete(self, obj: DBObject):
         """Delete object from database and remove from registries."""
