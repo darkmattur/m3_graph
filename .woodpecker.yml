@@ -66,6 +66,7 @@ steps:
         echo "Using extra index: $PIP_EXTRA_INDEX_URL"
         
       - pip install -e .[dev]
+      - ls -la
       - |
         if [ -d tests ] && find test -type f -name "test_*.py" | grep -q .; then
           echo "Running pytest..."
