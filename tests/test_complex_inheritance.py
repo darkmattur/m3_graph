@@ -177,7 +177,7 @@ class TestComplexInheritance:
 
         # Verify relationships work correctly
         assert acme.ceo == ceo
-        assert ceo in acme.ceo.companies_led
+        assert acme in acme.ceo.companies_led
         assert engineering.company == acme
         assert engineering in acme.departments
         assert engineering.manager == ceo
