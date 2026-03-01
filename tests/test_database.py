@@ -1852,10 +1852,13 @@ class TestTypeInheritance:
         assert smart_contract_meta[0]['parent_types'] == []
         assert set(evm_sc_meta[0]['parent_types']) == {'smart_contract'}
 
-        # ERC20 inherits from both ChainListing and EVMSmartContract
-        # Its type is 'on_chain' (from ChainListing, first in MRO)
-        # parent_types only includes types DIFFERENT from cls.type, so 'on_chain' is excluded
-        assert set(erc20_meta[0]['parent_types']) == {'evm_smart_contract', 'smart_contract'}
+        # ERC20 inherits from both ChainListing (type='on_chain') and EVMSmartContract
+        # Since ERC20 doesn't override 'type', it inherits type='on_chain' from ChainListing
+        # parent_types only includes ancestors with DIFFERENT type values, so 'on_chain' is excluded
+        # Therefore parent_types = {'evm_smart_contract', 'smart_contract'}
+        assert erc20_meta[0]['type'] == 'on_chain'
+        assert erc20_meta[0]['subtype'] == 'erc_20'
+        assert set(erc20_meta[0]['parent_types']) == {'evm_smart_contract', 'smart_contract', 'on_chain'}
 
         # ERC1155 only has on_chain as parent
         assert set(erc1155_meta[0]['parent_types']) == {'on_chain'}
