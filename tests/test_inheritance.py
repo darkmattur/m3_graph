@@ -382,7 +382,7 @@ class TestComplexInheritance:
         # Query meta table
         meta_rows = await db_connection.query(
             f"""
-            SELECT type, parent_types, forward, back
+            SELECT type, parent_types, descendant_types, forward, back
             FROM {test_schema}.meta
             ORDER BY type
             """
@@ -396,6 +396,7 @@ class TestComplexInheritance:
         for row in meta_rows:
             print(f"\nType: {row['type']}")
             print(f"  Parent types: {row['parent_types']}")
+            print(f"  Descendant types: {row['descendant_types']}")
             print(f"  Forward: {row['forward']}")
             print(f"  Back: {row['back']}")
         print("="*80 + "\n")
@@ -488,7 +489,7 @@ class TestComplexInheritance:
         # Query meta table
         meta_rows = await db_connection.query(
             f"""
-            SELECT type, parent_types, forward, back
+            SELECT type, parent_types, descendant_types, forward, back
             FROM {test_schema}.meta
             WHERE category = 'branches'
             ORDER BY type
@@ -503,6 +504,7 @@ class TestComplexInheritance:
         for row in meta_rows:
             print(f"\nType: {row['type']}")
             print(f"  Parent types: {row['parent_types']}")
+            print(f"  Descendant types: {row['descendant_types']}")
             print(f"  Forward: {row['forward']}")
             print(f"  Back: {row['back']}")
         print("="*80 + "\n")
