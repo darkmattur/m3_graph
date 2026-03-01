@@ -5,6 +5,7 @@ Tests multiple layers of inheritance with various relationship types
 and verifies that all inheritance and relationship metadata is correctly
 stored in the meta table.
 """
+from __future__ import annotations
 import pytest
 from m3_graph.link import Link, Backlink
 
@@ -49,25 +50,25 @@ class TestComplexInheritance:
         class Employee(Person):
             type = "employee"
             employee_id: str
-            department: Link['Department', "employees"] | None = None
-            manager: Link['Manager', "direct_reports"] | None = None
+            department: Link[Department, "employees"] | None = None
+            manager: Link[Manager, "direct_reports"] | None = None
 
         class Manager(Employee):
             type = "manager"
             direct_reports: Backlink[Employee]
-            managed_departments: Backlink['Department']
+            managed_departments: Backlink[Department]
 
         class Company(Organization):
             type = "company"
             stock_symbol: str | None = None
-            ceo: Link['Executive', "companies_led"] | None = None
-            departments: Backlink['Department']
+            ceo: Link[Executive, "companies_led"] | None = None
+            departments: Backlink[Department]
 
         # Layer 4: Even deeper nesting
         class SeniorManager(Manager):
             type = "senior_manager"
             budget_authority: float
-            reports_to: Link['Executive', "senior_team"] | None = None
+            reports_to: Link[Executive, "senior_team"] | None = None
 
         class Department(Organization):
             type = "department"
@@ -314,17 +315,17 @@ class TestComplexInheritance:
         class Mixin1(Base):
             type = "mixin1"
             feature1: str
-            related1: Link['Target1', "sources1"] | None = None
+            related1: Link[Target1, "sources1"] | None = None
 
         class Mixin2(Base):
             type = "mixin2"
             feature2: str
-            related2: Link['Target2', "sources2"] | None = None
+            related2: Link[Target2, "sources2"] | None = None
 
         class Combined(Mixin1):
             type = "combined"
             combined_attr: str
-            related3: Link['Target3', "sources3"] | None = None
+            related3: Link[Target3, "sources3"] | None = None
 
         class Target1(Base):
             type = "target1"
@@ -409,7 +410,7 @@ class TestComplexInheritance:
         class ChildB1(RootB):
             type = "child_b1"
             attr_b1: str
-            link_to_c: Link['ChildC1', "linked_from_b"] | None = None
+            link_to_c: Link[ChildC1, "linked_from_b"] | None = None
 
         class ChildB2(RootB):
             type = "child_b2"
