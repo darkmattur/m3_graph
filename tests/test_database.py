@@ -1839,7 +1839,7 @@ class TestTypeInheritance:
             f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'evm_smart_contract'"
         )
         erc20_meta = await graph._conn.query(
-            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE category = 'listing' AND subtype = 'erc_20'"
+            f"SELECT type, subtype, parent_types, descendant_types FROM {graph._schema}.meta WHERE category = 'listing' AND subtype = 'erc_20'"
         )
         erc1155_meta = await graph._conn.query(
             f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'erc_1155'"
