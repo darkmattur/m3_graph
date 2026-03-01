@@ -626,8 +626,7 @@ class DBObject(BaseModel):
             DO UPDATE SET
                 forward = EXCLUDED.forward,
                 back = EXCLUDED.back,
-                parent_types = EXCLUDED.parent_types,
-                descendant_types = ARRAY[%(type)s]
+                parent_types = EXCLUDED.parent_types
             """,
             category=cls.category,
             type=cls.type,
@@ -636,6 +635,18 @@ class DBObject(BaseModel):
             back=list(cls._back_rels) if cls._back_rels else None,
             parent_types=parent_types if parent_types else [],
         )
+
+        if parent_types:
+            await cls.graph._conn.execute(
+                f"""
+                UPDATE {cls.graph._schema}.meta
+                SET descendant_types = array_append(descendant_types, %(type)s)
+                WHERE type = ANY(%(parent_types)s)
+                  AND NOT (%(type)s = ANY(descendant_types))
+                """,
+                type=cls.type,
+                parent_types=parent_types,
+            )
 
     @classmethod
     async def _create_unique_index(cls):

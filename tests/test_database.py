@@ -1126,12 +1126,12 @@ class TestTypeInheritance:
         await Animal.maintain()
         await Dog.maintain()
 
-        # Check parent type
+        # Check parent type — dog should have been cascaded into animal's descendants
         animal_meta = await graph._conn.query(
             f"SELECT * FROM {graph._schema}.meta WHERE type = 'animal'"
         )
         assert animal_meta[0]['parent_types'] == []
-        assert animal_meta[0]['descendant_types'] == ["animal"]
+        assert set(animal_meta[0]['descendant_types']) == {"animal", "dog"}
 
         # Check child type
         dog_meta = await graph._conn.query(
@@ -1163,10 +1163,19 @@ class TestTypeInheritance:
         sports_meta = await graph._conn.query(
             f"SELECT * FROM {graph._schema}.meta WHERE type = 'sports_car'"
         )
-
-        # Should include both immediate parent and grandparent
         assert set(sports_meta[0]['parent_types']) == {"car", "vehicle"}
         assert sports_meta[0]['descendant_types'] == ["sports_car"]
+
+        # Check that ancestors accumulated their descendants
+        car_meta = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.meta WHERE type = 'car'"
+        )
+        assert set(car_meta[0]['descendant_types']) == {"car", "sports_car"}
+
+        vehicle_meta = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.meta WHERE type = 'vehicle'"
+        )
+        assert set(vehicle_meta[0]['descendant_types']) == {"vehicle", "car", "sports_car"}
 
     async def test_update_type_inheritance_on_maintain(self, graph):
         """Test that calling maintain() updates inheritance metadata."""
