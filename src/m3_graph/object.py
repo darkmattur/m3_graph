@@ -207,7 +207,6 @@ class DBObject(BaseModel):
                 # Only validate the target type when it has been resolved.
                 if link_info.target is not None:
                     linked_type = unwrap_optional(link_info.target)
-                    print(linked_type)
                     assert issubclass(linked_type, DBObject)
 
                 # Always allow None to support unsaved object references
