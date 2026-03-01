@@ -637,14 +637,24 @@ class DBObject(BaseModel):
         )
 
         if parent_types:
+            # Propagate this type and all its descendants to all ancestors
             await cls.graph._conn.execute(
                 f"""
-                UPDATE {cls.graph._schema}.meta
-                SET descendant_types = array_append(descendant_types, %(type)s)
-                WHERE type = ANY(%(parent_types)s)
-                  AND NOT (%(type)s = ANY(descendant_types))
+                UPDATE {cls.graph._schema}.meta AS parent
+                SET descendant_types = (
+                    SELECT ARRAY(
+                        SELECT DISTINCT unnest(parent.descendant_types || child.descendant_types)
+                    )
+                    FROM {cls.graph._schema}.meta AS child
+                    WHERE child.category = %(category)s
+                      AND child.type = %(type)s
+                      AND child.subtype = %(subtype)s
+                )
+                WHERE parent.type = ANY(%(parent_types)s)
                 """,
+                category=cls.category,
                 type=cls.type,
+                subtype=cls.subtype,
                 parent_types=parent_types,
             )
 
