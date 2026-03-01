@@ -1764,6 +1764,215 @@ class TestTypeInheritance:
                 if other_id != chain_id:
                     assert not any(f"chain{other_id}_" in d for d in root_meta[0]['descendant_types'])
 
+    async def test_recombining_branches_multiple_inheritance(self, graph):
+        """
+        Test complex pattern where branches recombine via multiple inheritance.
+
+        Structure mirrors real EVM blockchain types:
+                Origin                SmartContract
+                  |                         |
+                Chain               EVMSmartContract
+                  |                         |
+             ChainListing                  /
+                  |   \                   /
+                  |    \                 /
+                  |     \               /
+                  |      \             /
+             ERC1155    ERC20 (inherits from both ChainListing and EVMSmartContract)
+        """
+        class Origin(graph.DBObject):
+            category = "listing"
+            type = "origin"
+            name: str
+
+        class Chain(Origin):
+            type = "chain"
+            chain_name: str
+
+        class ChainListing(graph.DBObject):
+            category = "listing"
+            type = "on_chain"
+            asset: str | None = None
+
+        class SmartContract(graph.DBObject):
+            category = "smart_contract"
+            type = "smart_contract"
+            name: str
+
+        class EVMSmartContract(SmartContract):
+            type = "evm_smart_contract"
+            address: str | None = None
+
+        # ERC20 inherits from BOTH ChainListing and EVMSmartContract
+        class ERC20(ChainListing, EVMSmartContract):
+            subtype = "erc_20"
+            decimals: int | None = None
+
+        # ERC1155 only inherits from ChainListing
+        class ERC1155(ChainListing):
+            type = "erc_1155"
+            token_id: int | None = None
+
+        # Register all types
+        await Origin.maintain()
+        await Chain.maintain()
+        await ChainListing.maintain()
+        await SmartContract.maintain()
+        await EVMSmartContract.maintain()
+        await ERC20.maintain()
+        await ERC1155.maintain()
+
+        # Fetch metadata
+        origin_meta = await graph._conn.query(
+            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'origin'"
+        )
+        chain_meta = await graph._conn.query(
+            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'chain'"
+        )
+        on_chain_meta = await graph._conn.query(
+            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'on_chain'"
+        )
+        smart_contract_meta = await graph._conn.query(
+            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'smart_contract'"
+        )
+        evm_sc_meta = await graph._conn.query(
+            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'evm_smart_contract'"
+        )
+        erc20_meta = await graph._conn.query(
+            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE category = 'listing' AND subtype = 'erc_20'"
+        )
+        erc1155_meta = await graph._conn.query(
+            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'erc_1155'"
+        )
+
+        # Verify parent chains
+        assert origin_meta[0]['parent_types'] == []
+        assert set(chain_meta[0]['parent_types']) == {'origin'}
+        assert on_chain_meta[0]['parent_types'] == []
+        assert smart_contract_meta[0]['parent_types'] == []
+        assert set(evm_sc_meta[0]['parent_types']) == {'smart_contract'}
+
+        # ERC20 has BOTH on_chain (from ChainListing) and evm_smart_contract (from EVMSmartContract) as parents
+        # The type is 'on_chain' because ChainListing comes first in the MRO
+        assert set(erc20_meta[0]['parent_types']) == {'on_chain', 'evm_smart_contract', 'smart_contract'}
+
+        # ERC1155 only has on_chain as parent
+        assert set(erc1155_meta[0]['parent_types']) == {'on_chain'}
+
+        # Verify descendant chains
+        # Origin branch: origin -> chain (no ERC types since they inherit from ChainListing, not Chain)
+        assert set(origin_meta[0]['descendant_types']) == {'origin', 'chain'}
+        assert chain_meta[0]['descendant_types'] == ['chain']
+
+        # ChainListing branch: on_chain -> erc_20, erc_1155
+        # Note: erc_20 has type='on_chain' with subtype='erc_20'
+        assert set(on_chain_meta[0]['descendant_types']) == {'on_chain', 'erc_1155'}
+
+        # SmartContract branch: smart_contract -> evm_smart_contract
+        # evm_smart_contract appears in the on_chain row's descendants (through ERC20's multiple inheritance)
+        assert set(smart_contract_meta[0]['descendant_types']) == {'smart_contract', 'evm_smart_contract'}
+        assert evm_sc_meta[0]['descendant_types'] == ['evm_smart_contract']
+
+        # Leaf nodes have only themselves
+        assert erc1155_meta[0]['descendant_types'] == ['erc_1155']
+
+    async def test_complex_dag_with_cross_branch_inheritance(self, graph):
+        """
+        Test DAG (directed acyclic graph) pattern where types inherit from multiple branches.
+
+                    A         B         C
+                   / \       / \       /
+                  A1  A2    B1  B2    C1
+                   \   \   /   /     /
+                    \   \ /   /     /
+                     \   X   /     /
+                      \ / \ /     /
+                       Y   Z     /
+                        \   \   /
+                         \   \ /
+                          Final
+        """
+        class A(graph.DBObject):
+            category = "dag"
+            type = "a_root"
+            name: str
+
+        class B(graph.DBObject):
+            category = "dag"
+            type = "b_root"
+            name: str
+
+        class C(graph.DBObject):
+            category = "dag"
+            type = "c_root"
+            name: str
+
+        class A1(A):
+            type = "a1"
+
+        class A2(A):
+            type = "a2"
+
+        class B1(B):
+            type = "b1"
+
+        class B2(B):
+            type = "b2"
+
+        class C1(C):
+            type = "c1"
+
+        # X inherits from A2 and B1
+        class X(A2, B1):
+            type = "x"
+
+        # Y inherits from A1 and X
+        class Y(A1, X):
+            type = "y"
+
+        # Z inherits from B2 and X
+        class Z(B2, X):
+            type = "z"
+
+        # Final inherits from Y, Z, and C1
+        class Final(Y, Z, C1):
+            type = "final"
+
+        # Register all
+        for cls in [A, B, C, A1, A2, B1, B2, C1, X, Y, Z, Final]:
+            await cls.maintain()
+
+        # Check root descendants
+        a_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'a_root'"
+        )
+        b_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'b_root'"
+        )
+        c_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'c_root'"
+        )
+
+        # A root should have: a_root, a1, a2, x, y, z, final
+        # (anything that has A in its MRO)
+        assert 'a_root' in a_meta[0]['descendant_types']
+        assert 'a1' in a_meta[0]['descendant_types']
+        assert 'a2' in a_meta[0]['descendant_types']
+        assert 'x' in a_meta[0]['descendant_types']
+        assert 'y' in a_meta[0]['descendant_types']
+        assert 'final' in a_meta[0]['descendant_types']
+
+        # B root should have: b_root, b1, b2, x, y, z, final
+        assert 'b_root' in b_meta[0]['descendant_types']
+        assert 'b1' in b_meta[0]['descendant_types']
+        assert 'b2' in b_meta[0]['descendant_types']
+        assert 'x' in b_meta[0]['descendant_types']
+        assert 'z' in b_meta[0]['descendant_types']
+        assert 'final' in b_meta[0]['descendant_types']
+
+        # C root should have: c_root, c1, final
+        assert set(c_meta[0]['descendant_types']) == {'c_root', 'c1', 'final'}
+
 
 @pytest.mark.asyncio
 class TestSQLFunctions:
