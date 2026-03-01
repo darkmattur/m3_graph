@@ -248,11 +248,10 @@ class TestComplexInheritance:
         assert 'manager_id' in employee_forward
         assert employee_forward['manager_id'] == 'direct_reports_ids'
 
-        # Manager inherits Employee's relationships but has no additional forward rels
+        # Manager inherits Employee's forward relationships; the meta table stores inherited rels too.
+        # Manager itself adds no new forward rels, so it has exactly the same set as Employee.
         manager_forward = meta_by_type['manager']['forward']
-        # Manager class itself defines no forward relationships (only backlinks)
-        # The forward relationships come from inheritance
-        assert manager_forward == {} or manager_forward is None
+        assert manager_forward == meta_by_type['employee']['forward']
 
         # SeniorManager has reports_to
         senior_forward = meta_by_type['senior_manager']['forward']
