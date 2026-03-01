@@ -216,27 +216,54 @@ class TestComplexInheritance:
 
         # BaseEntity has no parents
         assert meta_by_type['base_entity']['parent_types'] == []
+        # BaseEntity should have ALL types as descendants (it's the root)
+        assert set(meta_by_type['base_entity']['descendant_types']) == {
+            'base_entity', 'person', 'organization', 'employee', 'manager',
+            'company', 'senior_manager', 'department'
+        }
 
         # Person inherits from BaseEntity
         assert 'base_entity' in meta_by_type['person']['parent_types']
+        # Person should have itself + employee + manager + senior_manager as descendants
+        assert set(meta_by_type['person']['descendant_types']) == {
+            'person', 'employee', 'manager', 'senior_manager'
+        }
 
         # Organization inherits from BaseEntity
         assert 'base_entity' in meta_by_type['organization']['parent_types']
+        # Organization should have itself + company + department as descendants
+        assert set(meta_by_type['organization']['descendant_types']) == {
+            'organization', 'company', 'department'
+        }
 
         # Employee inherits from Person (and transitively from BaseEntity)
         assert 'person' in meta_by_type['employee']['parent_types']
+        # Employee should have itself + manager + senior_manager as descendants
+        assert set(meta_by_type['employee']['descendant_types']) == {
+            'employee', 'manager', 'senior_manager'
+        }
 
         # Manager inherits from Employee
         assert 'employee' in meta_by_type['manager']['parent_types']
+        # Manager should have itself + senior_manager as descendants
+        assert set(meta_by_type['manager']['descendant_types']) == {
+            'manager', 'senior_manager'
+        }
 
         # Company inherits from Organization
         assert 'organization' in meta_by_type['company']['parent_types']
+        # Company has only itself (no children)
+        assert set(meta_by_type['company']['descendant_types']) == {'company'}
 
         # SeniorManager inherits from Manager
         assert 'manager' in meta_by_type['senior_manager']['parent_types']
+        # SeniorManager has only itself (no children)
+        assert set(meta_by_type['senior_manager']['descendant_types']) == {'senior_manager'}
 
         # Department inherits from Organization
         assert 'organization' in meta_by_type['department']['parent_types']
+        # Department has only itself (no children)
+        assert set(meta_by_type['department']['descendant_types']) == {'department'}
 
         # Verify forward relationships
 
@@ -379,6 +406,18 @@ class TestComplexInheritance:
         assert 'base' in meta_by_type['mixin2']['parent_types']
         assert 'mixin1' in meta_by_type['combined']['parent_types']
 
+        # Verify descendant relationships
+        # Base should have all types except targets as descendants
+        assert set(meta_by_type['base']['descendant_types']) >= {
+            'base', 'mixin1', 'mixin2', 'combined', 'target1', 'target2', 'target3'
+        }
+        # Mixin1 should have itself + combined
+        assert set(meta_by_type['mixin1']['descendant_types']) == {'mixin1', 'combined'}
+        # Mixin2 should have only itself (combined doesn't inherit from it)
+        assert set(meta_by_type['mixin2']['descendant_types']) == {'mixin2'}
+        # Combined should have only itself
+        assert set(meta_by_type['combined']['descendant_types']) == {'combined'}
+
         # Verify relationships are correctly tracked
         assert meta_by_type['mixin1']['forward']['related1_id'] == 'sources1_ids'
         assert meta_by_type['mixin2']['forward']['related2_id'] == 'sources2_ids'
@@ -472,6 +511,29 @@ class TestComplexInheritance:
         assert meta_by_type['root_a']['parent_types'] == []
         assert meta_by_type['root_b']['parent_types'] == []
         assert meta_by_type['root_c']['parent_types'] == []
+
+        # Verify descendant cascading within Branch A
+        assert set(meta_by_type['root_a']['descendant_types']) == {
+            'root_a', 'child_a1', 'grandchild_a1'
+        }
+        assert set(meta_by_type['child_a1']['descendant_types']) == {
+            'child_a1', 'grandchild_a1'
+        }
+        assert set(meta_by_type['grandchild_a1']['descendant_types']) == {'grandchild_a1'}
+
+        # Verify descendant cascading within Branch B
+        assert set(meta_by_type['root_b']['descendant_types']) == {
+            'root_b', 'child_b1', 'child_b2'
+        }
+        assert set(meta_by_type['child_b1']['descendant_types']) == {'child_b1'}
+        assert set(meta_by_type['child_b2']['descendant_types']) == {'child_b2'}
+
+        # Verify descendant cascading within Branch C
+        assert set(meta_by_type['root_c']['descendant_types']) == {
+            'root_c', 'child_c1', 'child_c2'
+        }
+        assert set(meta_by_type['child_c1']['descendant_types']) == {'child_c1'}
+        assert set(meta_by_type['child_c2']['descendant_types']) == {'child_c2'}
 
         # Verify inheritance within branches
         assert 'root_a' in meta_by_type['child_a1']['parent_types']
