@@ -1568,6 +1568,202 @@ class TestTypeInheritance:
         assert all(d.startswith('t1_') for d in t1_meta[0]['descendant_types'])
         assert all(d.startswith('t2_') for d in t2_meta[0]['descendant_types'])
 
+    async def test_asymmetric_branching_tree(self, graph):
+        """Test tree with uneven branching at each level."""
+        #             Root
+        #          /    |    \
+        #         A     B     C
+        #        / \    |
+        #      A1  A2   B1
+        #      |       / | \
+        #     A1a    B1a B1b B1c
+
+        class Root(graph.DBObject):
+            category = "asymmetric"
+            type = "root_asym"
+            name: str
+
+        class A(Root):
+            type = "a"
+
+        class B(Root):
+            type = "b"
+
+        class C(Root):
+            type = "c"
+
+        class A1(A):
+            type = "a1"
+
+        class A2(A):
+            type = "a2"
+
+        class B1(B):
+            type = "b1"
+
+        class A1a(A1):
+            type = "a1a"
+
+        class B1a(B1):
+            type = "b1a"
+
+        class B1b(B1):
+            type = "b1b"
+
+        class B1c(B1):
+            type = "b1c"
+
+        for cls in [Root, A, B, C, A1, A2, B1, A1a, B1a, B1b, B1c]:
+            await cls.maintain()
+
+        root_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'root_asym'"
+        )
+        a_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'a'"
+        )
+        b_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'b'"
+        )
+        c_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'c'"
+        )
+        b1_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'b1'"
+        )
+
+        # Root has all 11 types
+        assert set(root_meta[0]['descendant_types']) == {
+            'root_asym', 'a', 'b', 'c', 'a1', 'a2', 'b1', 'a1a', 'b1a', 'b1b', 'b1c'
+        }
+
+        # A branch: a, a1, a2, a1a
+        assert set(a_meta[0]['descendant_types']) == {'a', 'a1', 'a2', 'a1a'}
+
+        # B branch: b, b1, b1a, b1b, b1c
+        assert set(b_meta[0]['descendant_types']) == {'b', 'b1', 'b1a', 'b1b', 'b1c'}
+
+        # C is a leaf
+        assert c_meta[0]['descendant_types'] == ['c']
+
+        # B1 has itself + 3 children
+        assert set(b1_meta[0]['descendant_types']) == {'b1', 'b1a', 'b1b', 'b1c'}
+
+    async def test_wide_and_deep_combined(self, graph):
+        """Test combination of wide branching and deep nesting."""
+        #                  Root
+        #           /   |   |   |   \
+        #          L1  L2  L3  L4  L5  (5 children)
+        #          |
+        #         L1a
+        #          |
+        #        L1a1
+        #          |
+        #        L1a1i
+        #          |
+        #       L1a1i_
+
+        class Root(graph.DBObject):
+            category = "wide_deep"
+            type = "wd_root"
+            name: str
+
+        # Wide branching
+        class L1(Root):
+            type = "wd_l1"
+
+        class L2(Root):
+            type = "wd_l2"
+
+        class L3(Root):
+            type = "wd_l3"
+
+        class L4(Root):
+            type = "wd_l4"
+
+        class L5(Root):
+            type = "wd_l5"
+
+        # Deep chain on L1 branch
+        class L1a(L1):
+            type = "wd_l1a"
+
+        class L1a1(L1a):
+            type = "wd_l1a1"
+
+        class L1a1i(L1a1):
+            type = "wd_l1a1i"
+
+        class L1a1i_(L1a1i):
+            type = "wd_l1a1i_"
+
+        for cls in [Root, L1, L2, L3, L4, L5, L1a, L1a1, L1a1i, L1a1i_]:
+            await cls.maintain()
+
+        root_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'wd_root'"
+        )
+        l1_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'wd_l1'"
+        )
+        l2_meta = await graph._conn.query(
+            f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'wd_l2'"
+        )
+
+        # Root has all 10 types
+        assert set(root_meta[0]['descendant_types']) == {
+            'wd_root', 'wd_l1', 'wd_l2', 'wd_l3', 'wd_l4', 'wd_l5',
+            'wd_l1a', 'wd_l1a1', 'wd_l1a1i', 'wd_l1a1i_'
+        }
+
+        # L1 has deep chain
+        assert set(l1_meta[0]['descendant_types']) == {
+            'wd_l1', 'wd_l1a', 'wd_l1a1', 'wd_l1a1i', 'wd_l1a1i_'
+        }
+
+        # L2-L5 are leaves
+        assert l2_meta[0]['descendant_types'] == ['wd_l2']
+
+    async def test_multiple_independent_chains_same_category(self, graph):
+        """Test 5 independent linear chains in the same category."""
+        chains = []
+        for chain_id in range(5):
+            # Each chain is 4 levels deep
+            class Root(graph.DBObject):
+                category = "multi_chain"
+                type = f"chain{chain_id}_l1"
+                name: str
+
+            class L2(Root):
+                type = f"chain{chain_id}_l2"
+
+            class L3(L2):
+                type = f"chain{chain_id}_l3"
+
+            class L4(L3):
+                type = f"chain{chain_id}_l4"
+
+            chains.append([Root, L2, L3, L4])
+
+        # Register all
+        for chain in chains:
+            for cls in chain:
+                await cls.maintain()
+
+        # Verify each chain is independent
+        for chain_id in range(5):
+            root_meta = await graph._conn.query(
+                f"SELECT descendant_types FROM {graph._schema}.meta WHERE type = 'chain{chain_id}_l1'"
+            )
+
+            expected = {f"chain{chain_id}_l{level}" for level in range(1, 5)}
+            assert set(root_meta[0]['descendant_types']) == expected
+
+            # Ensure no cross-contamination from other chains
+            for other_id in range(5):
+                if other_id != chain_id:
+                    assert not any(f"chain{other_id}_" in d for d in root_meta[0]['descendant_types'])
+
 
 @pytest.mark.asyncio
 class TestSQLFunctions:
