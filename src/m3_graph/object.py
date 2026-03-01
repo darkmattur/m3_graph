@@ -600,22 +600,24 @@ class DBObject(BaseModel):
         if cls.category is None or cls.type is None or cls.subtype is None:
             return
 
-        # Collect parent types from base classes via MRO
+        # Collect parent_types from base classes via MRO
+        # NOTE: Despite the name, parent_types stores SUBTYPE values, not type values
         parent_types = []
         for base in cls.__mro__[1:]:
-            if hasattr(base, 'type') and base.type and base.type != cls.type:
-                parent_types.append(base.type)
+            if hasattr(base, 'subtype') and base.subtype and base.subtype != cls.subtype:
+                parent_types.append(base.subtype)
 
-        # Collect descendant types by checking ALL registered types in the graph
-        # A type T is a descendant of cls if cls.type appears in T's parent chain (MRO)
-        descendant_types = [cls.type]  # Always include self
-        for type_name, type_cls in cls.graph.__class__.types.items():
-            if type_name == cls.type:
+        # Collect descendant_types by checking ALL registered types in the graph
+        # NOTE: Despite the name, descendant_types stores SUBTYPE values, not type values
+        # A subtype S is a descendant of cls if cls.subtype appears in S's parent chain (MRO)
+        descendant_types = [cls.subtype]  # Always include self
+        for subtype_name, subtype_cls in cls.graph.__class__.subtypes.items():
+            if subtype_name == cls.subtype:
                 continue  # Skip self (already included)
-            # Check if cls.type is in this type's ancestry
-            for base in type_cls.__mro__[1:]:
-                if hasattr(base, 'type') and base.type == cls.type:
-                    descendant_types.append(type_name)
+            # Check if cls.subtype is in this subtype's ancestry
+            for base in subtype_cls.__mro__[1:]:
+                if hasattr(base, 'subtype') and base.subtype == cls.subtype:
+                    descendant_types.append(subtype_name)
                     break
 
         # Convert forward_rels to use _id suffix for database storage
