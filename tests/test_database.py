@@ -1774,10 +1774,10 @@ class TestTypeInheritance:
                 Chain               EVMSmartContract
                   |                         |
              ChainListing                  /
-                  |   \                   /
-                  |    \                 /
-                  |     \               /
-                  |      \             /
+                  |   \\                  /
+                  |    \\                /
+                  |     \\              /
+                  |      \\            /
              ERC1155    ERC20 (inherits from both ChainListing and EVMSmartContract)
         """
         class Origin(graph.DBObject):
@@ -1852,9 +1852,10 @@ class TestTypeInheritance:
         assert smart_contract_meta[0]['parent_types'] == []
         assert set(evm_sc_meta[0]['parent_types']) == {'smart_contract'}
 
-        # ERC20 has BOTH on_chain (from ChainListing) and evm_smart_contract (from EVMSmartContract) as parents
-        # The type is 'on_chain' because ChainListing comes first in the MRO
-        assert set(erc20_meta[0]['parent_types']) == {'on_chain', 'evm_smart_contract', 'smart_contract'}
+        # ERC20 inherits from both ChainListing and EVMSmartContract
+        # Its type is 'on_chain' (from ChainListing, first in MRO)
+        # parent_types only includes types DIFFERENT from cls.type, so 'on_chain' is excluded
+        assert set(erc20_meta[0]['parent_types']) == {'evm_smart_contract', 'smart_contract'}
 
         # ERC1155 only has on_chain as parent
         assert set(erc1155_meta[0]['parent_types']) == {'on_chain'}
@@ -1881,15 +1882,15 @@ class TestTypeInheritance:
         Test DAG (directed acyclic graph) pattern where types inherit from multiple branches.
 
                     A         B         C
-                   / \       / \       /
+                   / \\      / \\      /
                   A1  A2    B1  B2    C1
-                   \   \   /   /     /
-                    \   \ /   /     /
-                     \   X   /     /
-                      \ / \ /     /
+                   \\   \\  /   /     /
+                    \\   \\/   /     /
+                     \\   X   /     /
+                      \\ / \\/     /
                        Y   Z     /
-                        \   \   /
-                         \   \ /
+                        \\   \\  /
+                         \\   \\/
                           Final
         """
         class A(graph.DBObject):
