@@ -258,8 +258,8 @@ class TestComplexInheritance:
 
         # SeniorManager inherits from Manager
         assert 'manager' in meta_by_type['senior_manager']['parent_types']
-        # SeniorManager has only itself (no children)
-        assert set(meta_by_type['senior_manager']['descendant_types']) == {'senior_manager'}
+        # SeniorManager has itself + executive as descendants (Executive has subtype='executive')
+        assert set(meta_by_type['senior_manager']['descendant_types']) == {'senior_manager', 'executive'}
 
         # Department inherits from Organization
         assert 'organization' in meta_by_type['department']['parent_types']

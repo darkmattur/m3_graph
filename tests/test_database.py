@@ -1874,10 +1874,10 @@ class TestTypeInheritance:
         # descendant_types contains SUBTYPES, so 'erc_20' appears (not just 'on_chain')
         assert set(on_chain_meta[0]['descendant_types']) == {'on_chain', 'erc_20', 'erc_1155'}
 
-        # SmartContract branch: smart_contract -> evm_smart_contract
-        # evm_smart_contract appears in the on_chain row's descendants (through ERC20's multiple inheritance)
-        assert set(smart_contract_meta[0]['descendant_types']) == {'smart_contract', 'evm_smart_contract'}
-        assert evm_sc_meta[0]['descendant_types'] == ['evm_smart_contract']
+        # SmartContract branch: smart_contract -> evm_smart_contract -> erc_20 (via multiple inheritance)
+        # ERC20 (subtype='erc_20') inherits from EVMSmartContract, so it appears in descendants
+        assert set(smart_contract_meta[0]['descendant_types']) == {'smart_contract', 'evm_smart_contract', 'erc_20'}
+        assert set(evm_sc_meta[0]['descendant_types']) == {'evm_smart_contract', 'erc_20'}
 
         # Leaf nodes have only themselves
         assert erc1155_meta[0]['descendant_types'] == ['erc_1155']
