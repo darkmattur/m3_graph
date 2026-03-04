@@ -439,11 +439,16 @@ class DBObject(BaseModel):
     def get(cls, **kwargs):
         """Retrieve a single object by unique attributes or computed properties.
 
-        Uses in-memory indexes for fast lookups. Searches in order:
+        Uses in-memory indexes for fast lookups. Searches hierarchically across
+        the class and all its subclasses.
+
+        Searches in order:
         1. Computed property indexes (for single-property lookups)
         2. Subtype unique constraints (most specific)
         3. Type unique constraints
         4. Category unique constraints (least specific)
+
+        For each level, searches the current class and all descendant classes.
 
         Args:
             **kwargs: Attribute values to search for
@@ -456,44 +461,98 @@ class DBObject(BaseModel):
             KeyError: No object found matching the query
 
         Example:
-            user = User.get(email="user@example.com")
-            asset = Asset.get(symbol="BTC")
+            # Get a specific asset (searches Asset and all subclasses)
+            asset = Asset.get(symbol="BTC")  # May return Token, Stock, etc.
+
+            # Get a specific token (searches Token and all subclasses)
+            token = Token.get(symbol="ETH")  # May return WrappedToken, ERC20Token, etc.
         """
         if not kwargs:
             raise ValueError("At least one keyword argument required")
 
+        # Collect all descendant classes to search hierarchically
+        descendant_classes = cls._get_descendant_classes()
+
         # Check computed property indexes first (single property lookups)
         if len(kwargs) == 1:
             prop_name = next(iter(kwargs.keys()))
-            if prop_name in cls._computed_indexes:
-                value = kwargs[prop_name]
-                obj = cls._computed_indexes[prop_name].get(value)
-                if obj is None:
-                    raise KeyError(f"No {cls.__name__} found with {prop_name}={value}")
-                return obj
+            value = kwargs[prop_name]
+
+            # Search current class and all descendants
+            for search_cls in descendant_classes:
+                if prop_name in search_cls._computed_indexes:
+                    obj = search_cls._computed_indexes[prop_name].get(value)
+                    if obj is not None:
+                        return obj
+
+            # If we got here and computed index exists but no match found
+            if any(prop_name in search_cls._computed_indexes for search_cls in descendant_classes):
+                raise KeyError(f"No {cls.__name__} found with {prop_name}={value}")
 
         # Check subtype, type, then category indexes (most specific to least specific)
-        for cols, idx in itertools.chain(
-            cls._subtype_indexes.items(),
-            cls._type_indexes.items(),
-            cls._category_indexes.items()
-        ):
-            if set(cols) == set(kwargs.keys()):
-                key = tuple(kwargs[col] for col in cols)
-                obj = idx.get(key)
-                if obj is None:
-                    raise KeyError(f"No {cls.__name__} found with {kwargs}")
-                return obj
+        # Search across all descendant classes for each index level
+        # Track if we found matching constraint but no object
+        found_matching_constraint = False
 
-        # No matching unique constraint
-        computed = list(cls._computed_indexes.keys())
+        for index_attr in ['_subtype_indexes', '_type_indexes', '_category_indexes']:
+            for search_cls in descendant_classes:
+                indexes = getattr(search_cls, index_attr)
+                for cols, idx in indexes.items():
+                    if set(cols) == set(kwargs.keys()):
+                        found_matching_constraint = True
+                        key = tuple(kwargs[col] for col in cols)
+                        obj = idx.get(key)
+                        if obj is not None:
+                            return obj
+
+        # If we found a matching constraint but no object, raise KeyError
+        if found_matching_constraint:
+            raise KeyError(f"No {cls.__name__} found with {kwargs}")
+
+        # No matching unique constraint found - collect available constraints for error message
+        all_subtype = set()
+        all_type = set()
+        all_category = set()
+        all_computed = set()
+
+        for search_cls in descendant_classes:
+            all_subtype.update(search_cls._subtype_indexes.keys())
+            all_type.update(search_cls._type_indexes.keys())
+            all_category.update(search_cls._category_indexes.keys())
+            all_computed.update(search_cls._computed_indexes.keys())
+
         raise ValueError(
-            f"No unique constraint for {set(kwargs.keys())}. "
-            f"Available: subtype={list(cls._subtype_indexes.keys())}, "
-            f"type={list(cls._type_indexes.keys())}, "
-            f"category={list(cls._category_indexes.keys())}"
-            + (f", computed={computed}" if computed else "")
+            f"No unique constraint for {set(kwargs.keys())} in {cls.__name__} or its subclasses. "
+            f"Available: subtype={list(all_subtype)}, "
+            f"type={list(all_type)}, "
+            f"category={list(all_category)}"
+            + (f", computed={list(all_computed)}" if all_computed else "")
         )
+
+    @classmethod
+    def _get_descendant_classes(cls):
+        """Get all descendant classes in the hierarchy, including self.
+
+        Returns classes in order: self first, then all descendants.
+        This ensures more specific classes are checked before more general ones.
+        """
+        descendants = [cls]
+
+        # If we have a graph class with registered subtypes, use it to find descendants
+        if hasattr(cls, '_graph_cls') and hasattr(cls._graph_cls, 'subtypes'):
+            # Get this class's subtype to find descendants
+            if hasattr(cls, 'subtype') and cls.subtype:
+                # Find all registered classes that inherit from this class
+                for subtype_name, subtype_cls in cls._graph_cls.subtypes.items():
+                    if subtype_cls is not cls and issubclass(subtype_cls, cls):
+                        descendants.append(subtype_cls)
+            elif hasattr(cls, 'type') and cls.type:
+                # Use types registry instead
+                for type_name, type_cls in cls._graph_cls.types.items():
+                    if type_cls is not cls and issubclass(type_cls, cls):
+                        descendants.append(type_cls)
+
+        return descendants
 
     @classmethod
     def filter(cls, **kwargs):
