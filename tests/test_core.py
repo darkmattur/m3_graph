@@ -130,6 +130,51 @@ class TestDBObjectBasics:
         assert "name" in attrs
         assert "temp_data" not in attrs
 
+    def test_all_excluded_attrs_inheritance(self, graph):
+        """Test that _all_excluded_attrs collects excluded_attrs from parent classes."""
+        class BaseObj(graph.DBObject):
+            category = "test"
+            type = "base"
+            name: str
+            base_temp: str = "temp1"
+            excluded_attrs = {"base_temp"}
+
+        class MiddleObj(BaseObj):
+            type = "middle"
+            middle_data: str = "data"
+            middle_temp: str = "temp2"
+            excluded_attrs = {"middle_temp"}
+
+        class DerivedObj(MiddleObj):
+            type = "derived"
+            derived_data: str = "data"
+            derived_temp: str = "temp3"
+            excluded_attrs = {"derived_temp"}
+
+        # Test that _all_excluded_attrs includes all excluded attrs from the inheritance chain
+        assert "base_temp" in DerivedObj._all_excluded_attrs
+        assert "middle_temp" in DerivedObj._all_excluded_attrs
+        assert "derived_temp" in DerivedObj._all_excluded_attrs
+
+        # Create an instance and verify all excluded attrs are excluded from _get_attr()
+        obj = DerivedObj(
+            source="test",
+            name="test",
+            base_temp="b",
+            middle_data="m",
+            middle_temp="mt",
+            derived_data="d",
+            derived_temp="dt"
+        )
+
+        attrs = obj._get_attr()
+        assert "name" in attrs
+        assert "middle_data" in attrs
+        assert "derived_data" in attrs
+        assert "base_temp" not in attrs
+        assert "middle_temp" not in attrs
+        assert "derived_temp" not in attrs
+
     def test_inheritance(self, graph):
         """Test that DBObject inheritance works correctly."""
         class BaseModel(graph.DBObject):
