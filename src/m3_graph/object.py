@@ -288,7 +288,11 @@ class DBObject(BaseModel):
         if 'type' in cls.__dict__ and 'subtype' not in cls.__dict__:
             cls.subtype = cls.type
 
-        # 3. Initialize indexes
+        # 3. Collect excluded_attrs from all parent classes
+        cls._all_excluded_attrs = {attr for base in reversed(cls.__mro__)
+            if hasattr(base, 'excluded_attrs') for attr in base.excluded_attrs}
+
+        # 4. Initialize indexes
         cls._category_indexes = {}
         cls._type_indexes = {}
         cls._subtype_indexes = {}
@@ -581,7 +585,7 @@ class DBObject(BaseModel):
     def _get_attr(self) -> dict:
         """Extract attribute dict for database storage."""
         # Use mode='python' to preserve Decimal objects (don't serialize to JSON yet)
-        data = self.model_dump(mode='python', exclude={"id", "source"} | self.excluded_attrs)
+        data = self.model_dump(mode='python', exclude={"id", "source"} | self._all_excluded_attrs)
         
         # Filter out None values, keep forward relationship fields (_id), exclude backlinks (_ids)
         # Backlink arrays are managed by database triggers, not the ORM
