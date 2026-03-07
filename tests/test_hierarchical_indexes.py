@@ -1,8 +1,9 @@
 """
 Tests for hierarchical index lookups.
 
-Tests that get() and load() methods work hierarchically, so that:
+Tests that get() and find() and load() methods work hierarchically, so that:
 - Asset.get(symbol="BTC") can return a Token instance
+- Asset.find(symbol="BTC") can return a Token instance or None
 - Token.get(symbol="ETH") can return an ERC20Token instance
 - Asset.load() loads all descendants (Token, Stock, etc.)
 """
@@ -643,3 +644,301 @@ class TestHierarchicalEdgeCases:
         # Should list available constraints from all classes
         assert "symbol" in str(exc.value)
         assert "address" in str(exc.value)
+
+
+@pytest.mark.asyncio
+class TestHierarchicalFind:
+    """Test hierarchical lookups with find() method that returns None instead of raising KeyError."""
+
+    async def test_find_returns_none_when_not_found(self, graph):
+        """Test that find() returns None instead of raising KeyError."""
+
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            type_unique_attr = ['symbol']
+
+        btc = Asset(source="test", symbol="BTC")
+        await btc.insert()
+
+        # find() should return the object when found
+        found = Asset.find(symbol="BTC")
+        assert found is btc
+
+        # find() should return None when not found (not raise KeyError)
+        not_found = Asset.find(symbol="ETH")
+        assert not_found is None
+
+        # Compare with get() which raises KeyError
+        with pytest.raises(KeyError, match="No Asset found"):
+            Asset.get(symbol="ETH")
+
+    async def test_find_hierarchical_basic(self, graph):
+        """Test basic hierarchical find - parent class can retrieve child instances."""
+
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            name: str
+            type_unique_attr = ['symbol']
+
+        class Token(Asset):
+            type = "token"
+            chain: str
+
+        class Stock(Asset):
+            type = "stock"
+            exchange: str
+
+        btc = Token(source="test", symbol="BTC", name="Bitcoin", chain="BTC")
+        tsla = Stock(source="test", symbol="TSLA", name="Tesla", exchange="NASDAQ")
+        await btc.insert()
+        await tsla.insert()
+
+        # Asset.find() should find both Token and Stock instances
+        found_btc = Asset.find(symbol="BTC")
+        assert found_btc is btc
+        assert isinstance(found_btc, Token)
+
+        found_tsla = Asset.find(symbol="TSLA")
+        assert found_tsla is tsla
+        assert isinstance(found_tsla, Stock)
+
+        # Non-existent should return None
+        not_found = Asset.find(symbol="AAPL")
+        assert not_found is None
+
+    async def test_find_hierarchical_scoped_to_subclass(self, graph):
+        """Test that find() on subclass only finds that subclass and descendants."""
+
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            type_unique_attr = ['symbol']
+
+        class Token(Asset):
+            type = "token"
+            chain: str
+
+        class Stock(Asset):
+            type = "stock"
+            exchange: str
+
+        btc = Token(source="test", symbol="BTC", chain="BTC")
+        tsla = Stock(source="test", symbol="TSLA", exchange="NASDAQ")
+        await btc.insert()
+        await tsla.insert()
+
+        # Token.find() should find token
+        found_btc = Token.find(symbol="BTC")
+        assert found_btc is btc
+
+        # Token.find() should return None for stock (not a token)
+        not_found_tsla = Token.find(symbol="TSLA")
+        assert not_found_tsla is None
+
+        # Stock.find() should find stock
+        found_tsla = Stock.find(symbol="TSLA")
+        assert found_tsla is tsla
+
+        # Stock.find() should return None for token (not a stock)
+        not_found_btc = Stock.find(symbol="BTC")
+        assert not_found_btc is None
+
+    async def test_find_with_computed_property(self, graph):
+        """Test find() with computed property index."""
+
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            name: str
+            computed_unique_attr = ['full_name']
+
+            @property
+            def full_name(self) -> str:
+                return f"{self.symbol}:{self.name}"
+
+        btc = Asset(source="test", symbol="BTC", name="Bitcoin")
+        await btc.insert()
+
+        # Should find by computed property
+        found = Asset.find(full_name="BTC:Bitcoin")
+        assert found is btc
+
+        # Should return None for non-existent
+        not_found = Asset.find(full_name="ETH:Ethereum")
+        assert not_found is None
+
+    async def test_find_multi_column_constraint(self, graph):
+        """Test find() with multi-column unique constraint."""
+
+        class Transaction(graph.DBObject):
+            category = "financial"
+            type = "transaction"
+            account: str
+            date: str
+            sequence: int
+            type_unique_attr = [('account', 'date', 'sequence')]
+
+        tx = Transaction(
+            source="test",
+            account="ACC001",
+            date="2024-01-01",
+            sequence=1
+        )
+        await tx.insert()
+
+        # Should find with all columns
+        found = Transaction.find(account="ACC001", date="2024-01-01", sequence=1)
+        assert found is tx
+
+        # Should return None with wrong value
+        not_found = Transaction.find(account="ACC001", date="2024-01-01", sequence=2)
+        assert not_found is None
+
+    async def test_find_with_none_value(self, graph):
+        """Test find() can match None values."""
+
+        class Item(graph.DBObject):
+            category = "test"
+            type = "item"
+            name: str
+            code: str | None = None
+            type_unique_attr = ['code']
+
+        item = Item(source="test", name="Item", code=None)
+        await item.insert()
+
+        # Should find by None value
+        found = Item.find(code=None)
+        assert found is item
+
+    async def test_find_invalid_constraint_raises_value_error(self, graph):
+        """Test that find() raises ValueError for invalid constraints (not KeyError)."""
+
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            type_unique_attr = ['symbol']
+
+        btc = Asset(source="test", symbol="BTC")
+        await btc.insert()
+
+        # Invalid constraint should raise ValueError (same as get())
+        with pytest.raises(ValueError, match="No unique constraint"):
+            Asset.find(nonexistent="value")
+
+    async def test_find_deeply_nested_hierarchy(self, graph):
+        """Test find() with deeply nested class hierarchy."""
+
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            type_unique_attr = ['symbol']
+
+        class Token(Asset):
+            subtype = "token"
+            chain: str
+
+        class ERC20Token(Token):
+            subtype = "erc20"
+            decimals: int
+
+        class WrappedToken(ERC20Token):
+            subtype = "wrapped"
+            backing_asset: str
+
+        weth = WrappedToken(
+            source="test",
+            symbol="WETH",
+            chain="ETH",
+            decimals=18,
+            backing_asset="ETH"
+        )
+        await weth.insert()
+
+        # All levels should be able to find it
+        assert Asset.find(symbol="WETH") is weth
+        assert Token.find(symbol="WETH") is weth
+        assert ERC20Token.find(symbol="WETH") is weth
+        assert WrappedToken.find(symbol="WETH") is weth
+
+        # Non-existent returns None at all levels
+        assert Asset.find(symbol="DOGE") is None
+        assert Token.find(symbol="DOGE") is None
+        assert ERC20Token.find(symbol="DOGE") is None
+        assert WrappedToken.find(symbol="DOGE") is None
+
+    async def test_find_vs_get_consistency(self, graph):
+        """Test that find() and get() return same object when found."""
+
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            type_unique_attr = ['symbol']
+
+        btc = Asset(source="test", symbol="BTC")
+        await btc.insert()
+
+        # Both should return same instance when found
+        found_with_find = Asset.find(symbol="BTC")
+        found_with_get = Asset.get(symbol="BTC")
+        assert found_with_find is found_with_get is btc
+
+        # find() returns None, get() raises KeyError when not found
+        assert Asset.find(symbol="ETH") is None
+        with pytest.raises(KeyError):
+            Asset.get(symbol="ETH")
+
+    async def test_find_after_index_removal(self, graph):
+        """Test find() returns None after object is removed from indexes."""
+
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            type_unique_attr = ['symbol']
+
+        btc = Asset(source="test", symbol="BTC")
+        await btc.insert()
+
+        # Should find before removal
+        assert Asset.find(symbol="BTC") is btc
+
+        # Remove from indexes (simulating deletion cleanup)
+        btc._remove_from_indexes()
+
+        # Should return None after removal
+        assert Asset.find(symbol="BTC") is None
+
+    async def test_find_with_inherited_constraints(self, graph):
+        """Test find() with constraints inherited from base class."""
+
+        class BaseProduct(graph.DBObject):
+            category = "shop"
+            type = "base_product"
+            sku: str
+            category_unique_attr = ['sku']
+
+        class ElectronicProduct(BaseProduct):
+            type = "electronic"
+            voltage: int
+            type_unique_attr = ['voltage']
+
+        product = ElectronicProduct(source="test", sku="SKU001", voltage=220)
+        await product.insert()
+
+        # Should find by both inherited and own constraints
+        assert ElectronicProduct.find(sku="SKU001") is product
+        assert ElectronicProduct.find(voltage=220) is product
+
+        # Should return None for non-existent
+        assert ElectronicProduct.find(sku="SKU999") is None
+        assert ElectronicProduct.find(voltage=110) is None

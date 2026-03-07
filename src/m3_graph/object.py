@@ -536,7 +536,7 @@ class DBObject(BaseModel):
         return list(cls.graph.registry_type.get(cls.type, {}).values())
 
     @classmethod
-    def get(cls, **kwargs):
+    def find(cls, **kwargs):
         """Retrieve a single object by unique attributes or computed properties.
 
         Uses in-memory indexes for fast lookups. Searches hierarchically across
@@ -554,18 +554,17 @@ class DBObject(BaseModel):
             **kwargs: Attribute values to search for
 
         Returns:
-            The matching object
+            The matching object, or None if not found
 
         Raises:
             ValueError: No unique constraint matches provided kwargs
-            KeyError: No object found matching the query
 
         Example:
-            # Get a specific asset (searches Asset and all subclasses)
-            asset = Asset.get(symbol="BTC")  # May return Token, Stock, etc.
+            # Find a specific asset (searches Asset and all subclasses)
+            asset = Asset.find(symbol="BTC")  # Returns None if not found
 
-            # Get a specific token (searches Token and all subclasses)
-            token = Token.get(symbol="ETH")  # May return WrappedToken, ERC20Token, etc.
+            # Find a specific token (searches Token and all subclasses)
+            token = Token.find(symbol="ETH")  # May return WrappedToken, ERC20Token, etc.
         """
         if not kwargs:
             raise ValueError("At least one keyword argument required")
@@ -587,7 +586,7 @@ class DBObject(BaseModel):
 
             # If we got here and computed index exists but no match found
             if any(prop_name in search_cls._computed_indexes for search_cls in descendant_classes):
-                raise KeyError(f"No {cls.__name__} found with {prop_name}={value}")
+                return None
 
         # Check subtype, type, then category indexes (most specific to least specific)
         # Search across all descendant classes for each index level
@@ -605,9 +604,9 @@ class DBObject(BaseModel):
                         if obj is not None:
                             return obj
 
-        # If we found a matching constraint but no object, raise KeyError
+        # If we found a matching constraint but no object, return None
         if found_matching_constraint:
-            raise KeyError(f"No {cls.__name__} found with {kwargs}")
+            return None
 
         # No matching unique constraint found - collect available constraints for error message
         all_subtype = set()
@@ -628,6 +627,34 @@ class DBObject(BaseModel):
             f"category={list(all_category)}"
             + (f", computed={list(all_computed)}" if all_computed else "")
         )
+
+    @classmethod
+    def get(cls, **kwargs):
+        """Retrieve a single object by unique attributes or computed properties.
+
+        Like find(), but raises KeyError instead of returning None when no object is found.
+
+        Args:
+            **kwargs: Attribute values to search for
+
+        Returns:
+            The matching object
+
+        Raises:
+            ValueError: No unique constraint matches provided kwargs
+            KeyError: No object found matching the query
+
+        Example:
+            # Get a specific asset (searches Asset and all subclasses)
+            asset = Asset.get(symbol="BTC")  # Raises KeyError if not found
+
+            # Get a specific token (searches Token and all subclasses)
+            token = Token.get(symbol="ETH")  # May return WrappedToken, ERC20Token, etc.
+        """
+        obj = cls.find(**kwargs)
+        if obj is None:
+            raise KeyError(f"No {cls.__name__} found with {kwargs}")
+        return obj
 
     @classmethod
     def _get_descendant_classes(cls):
