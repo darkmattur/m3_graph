@@ -85,8 +85,9 @@ class DBObject(BaseModel):
     _computed_indexes: ClassVar[dict[str, dict]] = {}
     
     def __init__(self, **data):
-        # Track unsaved object references
+        # Track unsaved object references and saved object relationships
         unsaved_refs = {}
+        saved_rels = {}  # {rel_name: saved_target_obj}
 
         # Handle relationship assignments during initialization
         for key in list(data.keys()):
@@ -109,13 +110,29 @@ class DBObject(BaseModel):
                         data[id_key] = None
                     else:
                         data[id_key] = int(value.id)
+                        # Track saved object relationships for backlink registration
+                        saved_rels[key] = value
                 else:
                     data[id_key] = int(value)
 
         super().__init__(**data)
 
-        # Store unsaved references
+        # Store unsaved references and backlinks
         self._unsaved_refs = unsaved_refs
+        self._unsaved_backlinks = {}  # {backlink_field: list(objects)}
+
+        # Register backlinks for unsaved references
+        for rel_name, related_obj in unsaved_refs.items():
+            backlink_name, _ = self._forward_rels[rel_name]
+            if backlink_name:
+                self._register_unsaved_backlink(related_obj, backlink_name, self)
+
+        # Register backlinks for saved relationships (when self is unsaved)
+        if self.id is None:
+            for rel_name, related_obj in saved_rels.items():
+                backlink_name, _ = self._forward_rels[rel_name]
+                if backlink_name:
+                    self._register_unsaved_backlink(related_obj, backlink_name, self)
 
         # Register instance if id is set
         if self.id:
@@ -228,9 +245,25 @@ class DBObject(BaseModel):
 
                 def make_setter(field, rel_name, is_nullable):
                     def setter(self, value):
+                        # Get backlink name for this relationship
+                        backlink_name, _ = self._forward_rels.get(rel_name, (None, None))
+
+                        # Remove old backlink if exists (check current value)
+                        current_id = getattr(self, field, None)
+                        if backlink_name and current_id is None:
+                            # If current ID is None, might have unsaved ref
+                            if hasattr(self, '_unsaved_refs') and rel_name in self._unsaved_refs:
+                                old_target = self._unsaved_refs[rel_name]
+                                self._unregister_unsaved_backlink(old_target, backlink_name, self)
+
                         if value is None:
                             if not is_nullable:
                                 raise ValueError(f"{rel_name} is required and cannot be None")
+                            # Remove old backlink if self is unsaved and target was saved
+                            if backlink_name and self.id is None and current_id is not None:
+                                old_target = self.graph.registry.get(current_id)
+                                if old_target:
+                                    self._unregister_unsaved_backlink(old_target, backlink_name, self)
                             setattr(self, field, None)
                             # Clear unsaved reference
                             if hasattr(self, '_unsaved_refs') and rel_name in self._unsaved_refs:
@@ -242,6 +275,14 @@ class DBObject(BaseModel):
                                     self._unsaved_refs = {}
                                 self._unsaved_refs[rel_name] = value
                                 setattr(self, field, None)
+                                # Register backlink on target object
+                                if backlink_name:
+                                    self._register_unsaved_backlink(value, backlink_name, self)
+                                # Remove old backlink if it was to a saved object
+                                if current_id is not None and self.id is None:
+                                    old_target = self.graph.registry.get(current_id)
+                                    if old_target:
+                                        self._unregister_unsaved_backlink(old_target, backlink_name, self)
                             else:
                                 # Backfill the registry if the object has an ID
                                 if value.id not in self.graph.registry:
@@ -249,6 +290,9 @@ class DBObject(BaseModel):
                                     if hasattr(value, 'type') and value.type:
                                         self.graph.registry_type[value.type][value.id] = value
                                 setattr(self, field, int(value.id))
+                                # If self is unsaved, register backlink on the saved target
+                                if backlink_name and self.id is None:
+                                    self._register_unsaved_backlink(value, backlink_name, self)
                                 # Clear unsaved reference
                                 if hasattr(self, '_unsaved_refs') and rel_name in self._unsaved_refs:
                                     del self._unsaved_refs[rel_name]
@@ -270,15 +314,23 @@ class DBObject(BaseModel):
                 annotations[ids_field] = list[int]
                 setattr(cls, ids_field, Field(default_factory=list, exclude=True))
 
-                def make_backlink_getter(field):
+                def make_backlink_getter(field, backlink_name):
                     def getter(self: DBObject):
-                        return [
+                        # Get saved backlinks from database
+                        saved_backlinks = [
                             self.graph.registry[id_] for id_ in (getattr(self, field, []) or [])
                             if id_ in self.graph.registry
                         ]
+
+                        # Get unsaved backlinks from in-memory tracking
+                        unsaved_backlinks = []
+                        if hasattr(self, '_unsaved_backlinks'):
+                            unsaved_backlinks = self._unsaved_backlinks.get(backlink_name, [])
+
+                        return saved_backlinks + unsaved_backlinks
                     return getter
 
-                setattr(cls, name, property(make_backlink_getter(ids_field)))
+                setattr(cls, name, property(make_backlink_getter(ids_field, name)))
 
         cls.__annotations__ = annotations
         cls._forward_rels = forward_rels
@@ -331,6 +383,50 @@ class DBObject(BaseModel):
         # Skip the synthetic GraphedDBObject class created by the descriptor
         if cls.__name__ not in {'GraphedDBObject', 'DBObject'}:
             cls._graph_cls._object_register_cls(cls)
+
+    # Unsaved Backlink Management
+
+    @staticmethod
+    def _register_unsaved_backlink(target_obj: 'DBObject', backlink_name: str, source_obj: 'DBObject'):
+        """Register an unsaved backlink on the target object."""
+        if not hasattr(target_obj, '_unsaved_backlinks'):
+            target_obj._unsaved_backlinks = {}
+        if backlink_name not in target_obj._unsaved_backlinks:
+            target_obj._unsaved_backlinks[backlink_name] = []
+        # Avoid duplicates
+        if source_obj not in target_obj._unsaved_backlinks[backlink_name]:
+            target_obj._unsaved_backlinks[backlink_name].append(source_obj)
+
+    @staticmethod
+    def _unregister_unsaved_backlink(target_obj: 'DBObject', backlink_name: str, source_obj: 'DBObject'):
+        """Unregister an unsaved backlink from the target object."""
+        if hasattr(target_obj, '_unsaved_backlinks') and backlink_name in target_obj._unsaved_backlinks:
+            if source_obj in target_obj._unsaved_backlinks[backlink_name]:
+                target_obj._unsaved_backlinks[backlink_name].remove(source_obj)
+            # Clean up empty lists
+            if not target_obj._unsaved_backlinks[backlink_name]:
+                del target_obj._unsaved_backlinks[backlink_name]
+
+    def _clear_unsaved_backlinks(self, rel_name: str):
+        """Clear unsaved backlinks when a relationship is saved to database."""
+        if hasattr(self, '_unsaved_refs') and rel_name in self._unsaved_refs:
+            backlink_name, _ = self._forward_rels.get(rel_name, (None, None))
+            if backlink_name:
+                target = self._unsaved_refs[rel_name]
+                self._unregister_unsaved_backlink(target, backlink_name, self)
+
+    def _clear_all_unsaved_backlinks(self):
+        """Clear all unsaved backlinks when this object is saved."""
+        # Remove self from all saved targets' unsaved backlinks
+        for rel_name in self._forward_rels.keys():
+            backlink_name, _ = self._forward_rels[rel_name]
+            if backlink_name:
+                id_field = f"{rel_name}_id"
+                target_id = getattr(self, id_field, None)
+                if target_id is not None:
+                    target = self.graph.registry.get(target_id)
+                    if target:
+                        self._unregister_unsaved_backlink(target, backlink_name, self)
 
     # Index Management
 
@@ -611,6 +707,9 @@ class DBObject(BaseModel):
 
         self.id = await self.graph._insert(self)
 
+        # Clear unsaved backlinks now that object is saved
+        self._clear_all_unsaved_backlinks()
+
     async def update(self):
         """Update this object in the database."""
         if self.id is None:
@@ -638,6 +737,8 @@ class DBObject(BaseModel):
                 # Update the ID field
                 id_field = f"{rel_name}_id"
                 setattr(self, id_field, related_obj.id)
+                # Clear unsaved backlink
+                self._clear_unsaved_backlinks(rel_name)
                 # Remove from unsaved refs
                 del self._unsaved_refs[rel_name]
 
