@@ -117,9 +117,8 @@ class DBObject(BaseModel):
 
         super().__init__(**data)
 
-        # Store unsaved references and backlinks
+        # Store unsaved references
         self._unsaved_refs = unsaved_refs
-        self._unsaved_backlinks = {}  # {backlink_field: list(objects)}
 
         # Register backlinks for unsaved references
         for rel_name, related_obj in unsaved_refs.items():
@@ -311,26 +310,28 @@ class DBObject(BaseModel):
                 ids_field = f"{name}_ids"
                 back_rels.add(ids_field)
 
-                annotations[ids_field] = list[int]
+                # Store both IDs (int) and unsaved object references (DBObject)
+                # Note: We can't use proper typing here since DBObject may not be fully defined yet
+                # The list will contain either int or DBObject instances
+                annotations[ids_field] = list
                 setattr(cls, ids_field, Field(default_factory=list, exclude=True))
 
-                def make_backlink_getter(field, backlink_name):
+                def make_backlink_getter(field):
                     def getter(self: DBObject):
-                        # Get saved backlinks from database
-                        saved_backlinks = [
-                            self.graph.registry[id_] for id_ in (getattr(self, field, []) or [])
-                            if id_ in self.graph.registry
-                        ]
-
-                        # Get unsaved backlinks from in-memory tracking
-                        unsaved_backlinks = []
-                        if hasattr(self, '_unsaved_backlinks'):
-                            unsaved_backlinks = self._unsaved_backlinks.get(backlink_name, [])
-
-                        return saved_backlinks + unsaved_backlinks
+                        items = getattr(self, field, []) or []
+                        result = []
+                        for item in items:
+                            if isinstance(item, int):
+                                # Saved object - look up in registry
+                                if item in self.graph.registry:
+                                    result.append(self.graph.registry[item])
+                            elif isinstance(item, DBObject):
+                                # Unsaved object - use directly
+                                result.append(item)
+                        return result
                     return getter
 
-                setattr(cls, name, property(make_backlink_getter(ids_field, name)))
+                setattr(cls, name, property(make_backlink_getter(ids_field)))
 
         cls.__annotations__ = annotations
         cls._forward_rels = forward_rels
@@ -388,24 +389,30 @@ class DBObject(BaseModel):
 
     @staticmethod
     def _register_unsaved_backlink(target_obj: 'DBObject', backlink_name: str, source_obj: 'DBObject'):
-        """Register an unsaved backlink on the target object."""
-        if not hasattr(target_obj, '_unsaved_backlinks'):
-            target_obj._unsaved_backlinks = {}
-        if backlink_name not in target_obj._unsaved_backlinks:
-            target_obj._unsaved_backlinks[backlink_name] = []
+        """Register an unsaved backlink on the target object by adding to _ids list."""
+        ids_field = f"{backlink_name}_ids"
+        if not hasattr(target_obj, ids_field):
+            return
+
+        ids_list = getattr(target_obj, ids_field, [])
+        if ids_list is None:
+            ids_list = []
+            setattr(target_obj, ids_field, ids_list)
+
         # Avoid duplicates
-        if source_obj not in target_obj._unsaved_backlinks[backlink_name]:
-            target_obj._unsaved_backlinks[backlink_name].append(source_obj)
+        if source_obj not in ids_list:
+            ids_list.append(source_obj)
 
     @staticmethod
     def _unregister_unsaved_backlink(target_obj: 'DBObject', backlink_name: str, source_obj: 'DBObject'):
-        """Unregister an unsaved backlink from the target object."""
-        if hasattr(target_obj, '_unsaved_backlinks') and backlink_name in target_obj._unsaved_backlinks:
-            if source_obj in target_obj._unsaved_backlinks[backlink_name]:
-                target_obj._unsaved_backlinks[backlink_name].remove(source_obj)
-            # Clean up empty lists
-            if not target_obj._unsaved_backlinks[backlink_name]:
-                del target_obj._unsaved_backlinks[backlink_name]
+        """Unregister an unsaved backlink from the target object by removing from _ids list."""
+        ids_field = f"{backlink_name}_ids"
+        if not hasattr(target_obj, ids_field):
+            return
+
+        ids_list = getattr(target_obj, ids_field, [])
+        if ids_list and source_obj in ids_list:
+            ids_list.remove(source_obj)
 
     def _clear_unsaved_backlinks(self, rel_name: str):
         """Clear unsaved backlinks when a relationship is saved to database."""
@@ -416,8 +423,12 @@ class DBObject(BaseModel):
                 self._unregister_unsaved_backlink(target, backlink_name, self)
 
     def _clear_all_unsaved_backlinks(self):
-        """Clear all unsaved backlinks when this object is saved."""
-        # Remove self from all saved targets' unsaved backlinks
+        """Remove self from targets' in-memory backlink lists when saved.
+
+        The database triggers will handle adding the actual backlink IDs.
+        This is an in-memory only feature - we just clean up the unsaved object refs.
+        """
+        # For all targets this object links to, remove self from their in-memory backlink lists
         for rel_name in self._forward_rels.keys():
             backlink_name, _ = self._forward_rels[rel_name]
             if backlink_name:
@@ -719,6 +730,31 @@ class DBObject(BaseModel):
 
         return result
     
+    def _convert_backlink_refs_to_ids(self):
+        """Convert any saved object references in backlink lists to IDs.
+
+        Keep unsaved object references as-is since they're still valid in-memory backlinks.
+        """
+        for ids_field in self._back_rels:
+            ids_list = getattr(self, ids_field, [])
+            if not ids_list:
+                continue
+
+            # Convert DBObject references that have IDs to int IDs
+            # Keep unsaved DBObject references and int IDs as-is
+            converted = []
+            for item in ids_list:
+                if isinstance(item, DBObject):
+                    if item.id is not None:
+                        converted.append(item.id)
+                    else:
+                        # Keep unsaved object reference
+                        converted.append(item)
+                elif isinstance(item, int):
+                    converted.append(item)
+
+            setattr(self, ids_field, converted)
+
     async def insert(self):
         """Insert this object into the database."""
         if self.id is not None:
@@ -736,6 +772,9 @@ class DBObject(BaseModel):
 
         # Clear unsaved backlinks now that object is saved
         self._clear_all_unsaved_backlinks()
+
+        # Convert any remaining object references in backlinks to IDs
+        self._convert_backlink_refs_to_ids()
 
     async def update(self):
         """Update this object in the database."""

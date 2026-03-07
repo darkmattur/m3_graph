@@ -27,7 +27,7 @@ Lightweight PostgreSQL ORM with graph relationships, built on Pydantic.
 
 ## Why m3_graph?
 
-**m3_graph** fills a specific niche: applications that model complex, interconnected entities with rich type hierarchies. Think knowledge graphs, business process models, financial systems, or content management - domains where:
+**m3_graph** fills a specific niche: applications that model complex, interconnected entities with rich type hierarchies, domains where:
 
 - Entities have many bidirectional relationships
 - You want OOP-style inheritance for your data model
@@ -35,7 +35,7 @@ Lightweight PostgreSQL ORM with graph relationships, built on Pydantic.
 - Read-heavy workloads benefit from in-memory performance
 - Strong typing and validation prevent data corruption
 
-Unlike traditional ORMs (SQLAlchemy, Django ORM), m3_graph embraces graph-like structures and JSONB flexibility while maintaining type safety. Unlike pure graph databases (Neo4j), you keep PostgreSQL's reliability and ecosystem.
+As a general philosophy, edits to the graph can be made  in-memory, like a staging area, then committed to the database as needed.
 
 ## Features
 
