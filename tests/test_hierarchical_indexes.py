@@ -474,8 +474,8 @@ class TestHierarchicalLoad:
         assert len(graph.registry) == 1
         assert list(graph.registry.values())[0].symbol == "USDC"
 
-    async def test_load_hierarchical_with_expand(self, graph):
-        """Test that hierarchical load works with expand=True."""
+    async def test_load_hierarchical_includes_related(self, graph):
+        """Test that hierarchical load includes related objects."""
 
         class Asset(graph.DBObject):
             category = "financial"
@@ -506,8 +506,7 @@ class TestHierarchicalLoad:
         graph.registry.clear()
         graph.registry_type.clear()
 
-        # Load with expansion
-        await Asset.load(expand=True)
+        await Asset.load()
 
         # Should load both the token and the related company
         assert len(graph.registry) >= 1

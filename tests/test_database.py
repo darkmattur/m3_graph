@@ -2334,8 +2334,8 @@ class TestSQLFunctions:
 class TestObjectLoading:
     """Test the DBObject.load() method for type-based loading."""
 
-    async def test_load_simple_type_without_expansion(self, graph):
-        """Test loading objects of a simple type without relationship expansion."""
+    async def test_load_simple_type(self, graph):
+        """Test loading objects of a simple type."""
         class Item(graph.DBObject):
             category = "test"
             type = "item"
@@ -2390,8 +2390,8 @@ class TestObjectLoading:
         assert any(isinstance(obj, Dog) for obj in loaded)
         assert any(isinstance(obj, Cat) for obj in loaded)
 
-    async def test_load_with_expansion_forward_refs(self, graph):
-        """Test loading with expansion through forward relationships."""
+    async def test_load_includes_forward_refs(self, graph):
+        """Test that load includes objects connected via forward relationships."""
         class Author(graph.DBObject):
             category = "test"
             type = "author"
@@ -2416,9 +2416,9 @@ class TestObjectLoading:
         await book1.insert()
         await book2.insert()
 
-        # Load books with expansion should also load authors
+        # Load books should also load related authors
         graph.registry.clear()
-        await Book.load(expand=True)
+        await Book.load()
         loaded_ids = set(graph.registry.keys())
 
         assert book1.id in loaded_ids
@@ -2427,8 +2427,8 @@ class TestObjectLoading:
         # author2 should NOT be loaded (no book references it)
         assert author2.id not in loaded_ids
 
-    async def test_load_with_expansion_backlinks(self, graph):
-        """Test loading with expansion through backlink relationships."""
+    async def test_load_includes_backlinks(self, graph):
+        """Test that load includes objects connected via backlink relationships."""
         class Author(graph.DBObject):
             category = "test"
             type = "author_load_test"
@@ -2452,9 +2452,9 @@ class TestObjectLoading:
         await book1.insert()
         await book2.insert()
 
-        # Load authors with expansion should also load books
+        # Load authors should also load related books
         graph.registry.clear()
-        await Author.load(expand=True)
+        await Author.load()
         loaded_ids = set(graph.registry.keys())
 
         assert author.id in loaded_ids
@@ -2534,7 +2534,7 @@ class TestObjectLoading:
 
         assert len(graph.registry) == 0
 
-    async def test_load_complex_graph_with_expansion(self, graph):
+    async def test_load_complex_graph(self, graph):
         """Test loading a complex graph with multiple relationship levels."""
         class Company(graph.DBObject):
             category = "test"
@@ -2568,9 +2568,9 @@ class TestObjectLoading:
         await emp1.insert()
         await emp2.insert()
 
-        # Load employees with expansion should load dept and company too
+        # Load employees should also load related dept and company
         graph.registry.clear()
-        await Employee.load(expand=True)
+        await Employee.load()
         loaded_ids = set(graph.registry.keys())
 
         assert emp1.id in loaded_ids

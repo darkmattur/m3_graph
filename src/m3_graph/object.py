@@ -480,20 +480,14 @@ class DBObject(BaseModel):
     ####################################################################################
 
     @classmethod
-    async def load(cls, expand: bool = False):
-        """Load all objects of this type (including inherited subtypes) into the graph registry.
-
-        Args:
-            expand: If True, also load all objects connected via relationships (forward and backward)
-        """
+    async def load(cls):
+        """Load all objects of this type (including inherited subtypes) and their related objects into the graph registry."""
         if not hasattr(cls, 'type') or cls.type is None:
             raise ValueError(f"Cannot load objects for class {cls.__name__} without a type attribute")
 
-        # Use SQL function to fetch objects by type (with optional expansion)
         rows = await cls.graph._conn.query(
-            f"SELECT * FROM {cls.graph._schema}.fetch_object_by_type(%(type)s, %(expand)s)",
+            f"SELECT * FROM {cls.graph._schema}.fetch_object_by_type(%(type)s, true)",
             type=cls.type,
-            expand=expand
         )
 
         # Load objects into the registry
