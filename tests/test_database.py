@@ -2350,11 +2350,11 @@ class TestObjectLoading:
 
         # Clear registry and load
         graph.registry.clear()
-        loaded = await Item.load()
+        await Item.load()
+        loaded = list(graph.registry.values())
 
         assert len(loaded) == 2
         assert {obj.name for obj in loaded} == {"Item1", "Item2"}
-        assert all(obj.id in graph.registry for obj in loaded)
 
     async def test_load_with_inherited_types(self, graph):
         """Test that load() includes objects of inherited subtypes."""
@@ -2382,7 +2382,8 @@ class TestObjectLoading:
 
         # Load from Animal (parent type) should get both dog and cat
         graph.registry.clear()
-        loaded = await Animal.load()
+        await Animal.load()
+        loaded = list(graph.registry.values())
 
         assert len(loaded) == 2
         assert {obj.name for obj in loaded} == {"Buddy", "Whiskers"}
@@ -2417,9 +2418,9 @@ class TestObjectLoading:
 
         # Load books with expansion should also load authors
         graph.registry.clear()
-        loaded = await Book.load(expand=True)
+        await Book.load(expand=True)
+        loaded_ids = set(graph.registry.keys())
 
-        loaded_ids = {obj.id for obj in loaded}
         assert book1.id in loaded_ids
         assert book2.id in loaded_ids
         assert author1.id in loaded_ids
@@ -2453,13 +2454,13 @@ class TestObjectLoading:
 
         # Load authors with expansion should also load books
         graph.registry.clear()
-        loaded = await Author.load(expand=True)
+        await Author.load(expand=True)
+        loaded_ids = set(graph.registry.keys())
 
-        loaded_ids = {obj.id for obj in loaded}
         assert author.id in loaded_ids
         assert book1.id in loaded_ids
         assert book2.id in loaded_ids
-        assert len(loaded) == 3
+        assert len(graph.registry) == 3
 
     async def test_load_multilevel_inheritance(self, graph):
         """Test loading with multiple levels of inheritance."""
@@ -2487,16 +2488,16 @@ class TestObjectLoading:
 
         # Load from Vehicle should get all descendants
         graph.registry.clear()
-        loaded = await Vehicle.load()
+        await Vehicle.load()
 
-        assert len(loaded) == 2
-        assert {obj.name for obj in loaded} == {"Ferrari", "Sedan"}
+        assert len(graph.registry) == 2
+        assert {obj.name for obj in graph.registry.values()} == {"Ferrari", "Sedan"}
 
         # Load from Car should get Car and SportsCar
         graph.registry.clear()
-        loaded = await Car.load()
+        await Car.load()
 
-        assert len(loaded) == 2
+        assert len(graph.registry) == 2
 
     async def test_load_returns_already_loaded_objects(self, graph):
         """Test that load() reuses already-loaded objects from registry."""
@@ -2511,12 +2512,12 @@ class TestObjectLoading:
         await item.insert()
 
         # First load
-        loaded1 = await Item.load()
-        obj1 = loaded1[0]
+        await Item.load()
+        obj1 = graph.registry[item.id]
 
         # Second load should return same object instance
-        loaded2 = await Item.load()
-        obj2 = loaded2[0]
+        await Item.load()
+        obj2 = graph.registry[item.id]
 
         assert obj1 is obj2  # Same instance
 
@@ -2529,9 +2530,9 @@ class TestObjectLoading:
 
         await Item.maintain()
 
-        loaded = await Item.load()
+        await Item.load()
 
-        assert loaded == []
+        assert len(graph.registry) == 0
 
     async def test_load_complex_graph_with_expansion(self, graph):
         """Test loading a complex graph with multiple relationship levels."""
@@ -2569,14 +2570,14 @@ class TestObjectLoading:
 
         # Load employees with expansion should load dept and company too
         graph.registry.clear()
-        loaded = await Employee.load(expand=True)
+        await Employee.load(expand=True)
+        loaded_ids = set(graph.registry.keys())
 
-        loaded_ids = {obj.id for obj in loaded}
         assert emp1.id in loaded_ids
         assert emp2.id in loaded_ids
         assert dept.id in loaded_ids
         assert company.id in loaded_ids
-        assert len(loaded) == 4
+        assert len(graph.registry) == 4
 
     async def test_load_without_type_raises_error(self, graph):
         """Test that calling load() on a class without type raises error."""
@@ -2610,10 +2611,10 @@ class TestObjectLoading:
         await product.insert()
 
         graph.registry.clear()
-        loaded = await Product.load()
+        await Product.load()
 
-        assert len(loaded) == 1
-        obj = loaded[0]
+        assert len(graph.registry) == 1
+        obj = list(graph.registry.values())[0]
         assert obj.name == "Widget"
         assert obj.price == Decimal("19.99")
         assert obj.tags == ["new", "featured"]

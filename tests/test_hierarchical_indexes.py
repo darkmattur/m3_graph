@@ -410,7 +410,8 @@ class TestHierarchicalLoad:
         graph.registry_type.clear()
 
         # Asset.load() should load all assets including tokens and stocks
-        loaded = await Asset.load()
+        await Asset.load()
+        loaded = list(graph.registry.values())
         assert len(loaded) == 3
         assert any(obj.symbol == "BTC" for obj in loaded)
         assert any(obj.symbol == "ETH" for obj in loaded)
@@ -457,21 +458,21 @@ class TestHierarchicalLoad:
         graph.registry_type.clear()
 
         # Asset.load() should load all three
-        loaded = await Asset.load()
-        assert len(loaded) == 3
+        await Asset.load()
+        assert len(graph.registry) == 3
 
         # Token.load() should also load all three (they're all tokens)
         graph.registry.clear()
         graph.registry_type.clear()
-        loaded = await Token.load()
-        assert len(loaded) == 3
+        await Token.load()
+        assert len(graph.registry) == 3
 
         # ERC20Token.load() should only load USDC
         graph.registry.clear()
         graph.registry_type.clear()
-        loaded = await ERC20Token.load()
-        assert len(loaded) == 1
-        assert loaded[0].symbol == "USDC"
+        await ERC20Token.load()
+        assert len(graph.registry) == 1
+        assert list(graph.registry.values())[0].symbol == "USDC"
 
     async def test_load_hierarchical_with_expand(self, graph):
         """Test that hierarchical load works with expand=True."""
@@ -506,11 +507,11 @@ class TestHierarchicalLoad:
         graph.registry_type.clear()
 
         # Load with expansion
-        loaded = await Asset.load(expand=True)
+        await Asset.load(expand=True)
 
         # Should load both the token and the related company
-        assert len(loaded) >= 1
-        assert any(isinstance(obj, Token) for obj in loaded)
+        assert len(graph.registry) >= 1
+        assert any(isinstance(obj, Token) for obj in graph.registry.values())
 
     async def test_load_hierarchical_separate_branches(self, graph):
         """Test that load() respects inheritance boundaries."""
@@ -546,16 +547,16 @@ class TestHierarchicalLoad:
         graph.registry_type.clear()
 
         # Token.load() should load Token and NFT, but not Stock
-        loaded = await Token.load()
-        assert len(loaded) == 2
-        assert all(isinstance(obj, Token) for obj in loaded)
+        await Token.load()
+        assert len(graph.registry) == 2
+        assert all(isinstance(obj, Token) for obj in graph.registry.values())
 
         # Stock.load() should only load Stock
         graph.registry.clear()
         graph.registry_type.clear()
-        loaded = await Stock.load()
-        assert len(loaded) == 1
-        assert isinstance(loaded[0], Stock)
+        await Stock.load()
+        assert len(graph.registry) == 1
+        assert isinstance(list(graph.registry.values())[0], Stock)
 
 
 @pytest.mark.asyncio
@@ -617,9 +618,9 @@ class TestHierarchicalEdgeCases:
 
         await graph.maintain()
 
-        # Should return empty list, not error
-        loaded = await Asset.load()
-        assert loaded == []
+        # Should populate registry with nothing, not error
+        await Asset.load()
+        assert len(graph.registry) == 0
 
     async def test_get_hierarchical_error_messages(self, graph):
         """Test that error messages in hierarchical get are helpful."""

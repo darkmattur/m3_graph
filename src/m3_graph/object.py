@@ -481,13 +481,10 @@ class DBObject(BaseModel):
 
     @classmethod
     async def load(cls, expand: bool = False):
-        """Load all objects of this type (including inherited subtypes) into the graph.
+        """Load all objects of this type (including inherited subtypes) into the graph registry.
 
         Args:
             expand: If True, also load all objects connected via relationships (forward and backward)
-
-        Returns:
-            List of loaded objects
         """
         if not hasattr(cls, 'type') or cls.type is None:
             raise ValueError(f"Cannot load objects for class {cls.__name__} without a type attribute")
@@ -500,13 +497,11 @@ class DBObject(BaseModel):
         )
 
         # Load objects into the registry
-        loaded_objects = []
         graph_cls = type(cls.graph)
 
         for row in rows:
             # Skip if already loaded
             if row['id'] in cls.graph.registry:
-                loaded_objects.append(cls.graph.registry[row['id']])
                 continue
 
             subtype = row['subtype']
@@ -528,10 +523,7 @@ class DBObject(BaseModel):
             }
 
             # Initialize the object (this registers it automatically)
-            obj = obj_cls(**obj_data)
-            loaded_objects.append(obj)
-
-        return loaded_objects
+            obj_cls(**obj_data)
 
     @classmethod
     def all(cls):
