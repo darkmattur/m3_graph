@@ -190,27 +190,24 @@ class Graph:
 
         return obj.id
 
-    async def _update(self, obj: DBObject):
-        """Update existing DBObject in database."""
+    async def _update(self, obj: DBObject) -> bool:
+        """Update existing DBObject in database; returns True only when data actually changed."""
         if obj.id is None:
             raise ValueError("Cannot update object without id")
 
-        await self._conn.execute(
-            f"""
-            UPDATE {self._schema}.object
-            SET category = %(category)s, type = %(type)s, subtype = %(subtype)s, attr = %(attr)s, source = %(source)s
-            WHERE id = %(id)s
-            """,
+        rows = await self._conn.query(
+            f"SELECT {self._schema}.update_object(%(id)s, %(category)s, %(type)s, %(subtype)s, %(attr)s, %(source)s) AS changed",
             id=obj.id,
             category=obj.category,
             type=obj.type,
             subtype=obj.subtype,
             attr=obj._get_attr(),
-            source=obj.source
+            source=obj.source,
         )
+        return rows[0]['changed']
 
-    async def _delete(self, obj: DBObject):
-        """Delete object from database and remove from registries."""
+    async def _delete(self, obj: DBObject) -> bool:
+        """Delete object from database and remove from registries; always returns True."""
         if obj.id is None:
             raise ValueError("Cannot delete object without id")
 
@@ -221,3 +218,4 @@ class Graph:
             self.registry_type[obj.type].pop(obj.id, None)
 
         obj.id = None
+        return True

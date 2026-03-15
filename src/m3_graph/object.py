@@ -741,8 +741,8 @@ class DBObject(BaseModel):
 
             setattr(self, ids_field, converted)
 
-    async def insert(self):
-        """Insert this object into the database."""
+    async def insert(self) -> bool:
+        """Insert this object into the database; always returns True."""
         if self.id is not None:
             raise ValueError("Cannot insert object with existing id")
 
@@ -762,8 +762,10 @@ class DBObject(BaseModel):
         # Convert any remaining object references in backlinks to IDs
         self._convert_backlink_refs_to_ids()
 
-    async def update(self):
-        """Update this object in the database."""
+        return True
+
+    async def update(self) -> bool:
+        """Update this object in the database; returns True only when data actually changed."""
         if self.id is None:
             raise ValueError("Cannot update object without id")
 
@@ -775,10 +777,10 @@ class DBObject(BaseModel):
                 f"Either save them first or use upsert() for automatic cascading save."
             )
 
-        await self.graph._update(self)
-    
-    async def upsert(self):
-        """Insert or update this object in the database.
+        return await self.graph._update(self)
+
+    async def upsert(self) -> bool:
+        """Insert or update this object in the database; returns True when data actually changed.
 
         Automatically upserts any unsaved related objects first.
         """
@@ -795,16 +797,16 @@ class DBObject(BaseModel):
                 del self._unsaved_refs[rel_name]
 
         if self.id is None:
-            await self.insert()
+            return await self.insert()
         else:
-            await self.update()
+            return await self.update()
 
-    async def delete(self):
-        """Delete this object from the database and remove it from the graph."""
+    async def delete(self) -> bool:
+        """Delete this object from the database and remove it from the graph; always returns True."""
         if self.id is None:
             raise ValueError("Cannot delete object without id")
 
-        await self.graph._delete(self)
+        return await self.graph._delete(self)
     
     # Maintenance
 

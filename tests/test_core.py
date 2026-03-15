@@ -634,3 +634,86 @@ class TestObjectIdentity:
         # Should be in registry automatically
         assert 999 in graph.registry
         assert graph.registry[999] is asset
+
+
+@pytest.mark.asyncio
+class TestChangedFlag:
+    """Test boolean return values from CRUD operations."""
+
+    async def test_insert_returns_true(self, graph):
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+
+        asset = Asset(source="test", symbol="BTC")
+        assert await asset.insert() is True
+
+    async def test_update_returns_true_when_changed(self, graph):
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            name: str
+
+        asset = Asset(source="test", symbol="BTC", name="Bitcoin")
+        await asset.insert()
+
+        asset.name = "Bitcoin Core"
+        assert await asset.update() is True
+
+    async def test_update_returns_false_when_unchanged(self, graph):
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            name: str
+
+        asset = Asset(source="test", symbol="BTC", name="Bitcoin")
+        await asset.insert()
+
+        assert await asset.update() is False
+
+    async def test_upsert_insert_path_returns_true(self, graph):
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+
+        asset = Asset(source="test", symbol="BTC")
+        assert await asset.upsert() is True
+
+    async def test_upsert_update_path_returns_true_when_changed(self, graph):
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+            name: str
+
+        asset = Asset(source="test", symbol="BTC", name="Bitcoin")
+        await asset.insert()
+
+        asset.name = "Bitcoin Core"
+        assert await asset.upsert() is True
+
+    async def test_upsert_update_path_returns_false_when_unchanged(self, graph):
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+
+        asset = Asset(source="test", symbol="BTC")
+        await asset.insert()
+
+        assert await asset.upsert() is False
+
+    async def test_delete_returns_true(self, graph):
+        class Asset(graph.DBObject):
+            category = "financial"
+            type = "asset"
+            symbol: str
+
+        asset = Asset(source="test", symbol="BTC")
+        await asset.insert()
+
+        assert await asset.delete() is True
