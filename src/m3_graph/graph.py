@@ -4,6 +4,7 @@ from pathlib import Path
 from collections import defaultdict
 from typing import Type, ClassVar
 
+from psycopg.types.json import Jsonb
 from .conn import connect, DBConn
 from .object import DBObject
 
@@ -201,7 +202,7 @@ class Graph:
             category=obj.category,
             type=obj.type,
             subtype=obj.subtype,
-            attr=obj._get_attr(),
+            attr=Jsonb(obj._get_attr()),
             source=obj.source,
         )
         return rows[0]['changed']

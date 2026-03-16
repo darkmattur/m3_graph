@@ -4,12 +4,17 @@ import psycopg
 import psycopg.rows
 
 import simplejson
-from psycopg.types.json import JsonDumper, JsonLoader, Jsonb
+from psycopg.types.json import JsonDumper, JsonbDumper, JsonLoader, Jsonb
 from psycopg.types.datetime import DateLoader, DateDumper, TimestamptzLoader
 
 # JSON dumper / loader for decimal support
 
 class SimpleJsonDumper(JsonDumper):
+    def dump(self, obj):
+        return simplejson.dumps(obj, use_decimal=True).encode('utf-8')
+
+
+class SimpleJsonbDumper(JsonbDumper):
     def dump(self, obj):
         return simplejson.dumps(obj, use_decimal=True).encode('utf-8')
 
@@ -98,7 +103,7 @@ async def connect(*args, host, port=None, dbname, user=None, password=None, **kw
     # Register dumpers for date, dict and Jsonb types
     db_conn.adapters.register_dumper(dt.date, InfDateDumper)
     db_conn.adapters.register_dumper(dict, SimpleJsonDumper)
-    db_conn.adapters.register_dumper(Jsonb, SimpleJsonDumper)
+    db_conn.adapters.register_dumper(Jsonb, SimpleJsonbDumper)
 
     # Register loaders
     db_conn.adapters.register_loader("json", SimpleJsonLoader)
