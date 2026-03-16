@@ -16,7 +16,7 @@ class SimpleJsonDumper(JsonDumper):
 
 class SimpleJsonbDumper(JsonbDumper):
     def dump(self, obj):
-        return simplejson.dumps(obj, use_decimal=True).encode('utf-8')
+        return simplejson.dumps(obj.obj, use_decimal=True).encode('utf-8')
 
 
 class SimpleJsonLoader(JsonLoader):
