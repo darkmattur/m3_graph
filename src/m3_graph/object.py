@@ -77,6 +77,7 @@ class DBObject(BaseModel):
 
     # Relationships
     _forward_rels: ClassVar[dict[str, tuple[str | None, bool]]] = {}
+    _forward_rel_types: ClassVar[dict[str, Type['DBObject']]] = {}
     _back_rels: ClassVar[set[str]] = set()
 
     _category_indexes: ClassVar[dict[tuple[str, ...], dict]] = {}
@@ -187,10 +188,12 @@ class DBObject(BaseModel):
 
         # 1. Relationships
         forward_rels = {}
+        forward_rel_types = {}
         back_rels = set()
 
         for base in cls.__mro__[1:]:
             forward_rels.update(getattr(base, '_forward_rels', {}))
+            forward_rel_types.update(getattr(base, '_forward_rel_types', {}))
             back_rels.update(getattr(base, '_back_rels', set()))
 
         for name in list(annotations.keys()):
@@ -224,6 +227,7 @@ class DBObject(BaseModel):
                 if link_info.target is not None:
                     linked_type = unwrap_optional(link_info.target)
                     assert issubclass(linked_type, DBObject)
+                    forward_rel_types[name] = linked_type
 
                 # Always allow None to support unsaved object references
                 annotations[id_field] = int | None
@@ -335,6 +339,7 @@ class DBObject(BaseModel):
 
         cls.__annotations__ = annotations
         cls._forward_rels = forward_rels
+        cls._forward_rel_types = forward_rel_types
         cls._back_rels = back_rels
 
         # 2. Set defaults
