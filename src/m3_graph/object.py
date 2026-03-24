@@ -562,11 +562,11 @@ class DBObject(BaseModel):
             ValueError: No unique constraint matches provided kwargs
 
         Example:
-            # Find a specific asset (searches Asset and all subclasses)
-            asset = Asset.find(symbol="BTC")  # Returns None if not found
+            # Find a specific item (searches Item and all subclasses)
+            item = Item.find(code="ABC")  # Returns None if not found
 
-            # Find a specific token (searches Token and all subclasses)
-            token = Token.find(symbol="ETH")  # May return WrappedToken, ERC20Token, etc.
+            # Find a specific widget (searches Widget and all subclasses)
+            widget = Widget.find(code="XYZ")  # May return SpecialWidget, CustomWidget, etc.
         """
         if not kwargs:
             raise ValueError("At least one keyword argument required")
@@ -647,11 +647,11 @@ class DBObject(BaseModel):
             KeyError: No object found matching the query
 
         Example:
-            # Get a specific asset (searches Asset and all subclasses)
-            asset = Asset.get(symbol="BTC")  # Raises KeyError if not found
+            # Get a specific item (searches Item and all subclasses)
+            item = Item.get(code="ABC")  # Raises KeyError if not found
 
-            # Get a specific token (searches Token and all subclasses)
-            token = Token.get(symbol="ETH")  # May return WrappedToken, ERC20Token, etc.
+            # Get a specific widget (searches Widget and all subclasses)
+            widget = Widget.get(code="XYZ")  # May return SpecialWidget, CustomWidget, etc.
         """
         obj = cls.find(**kwargs)
         if obj is None:

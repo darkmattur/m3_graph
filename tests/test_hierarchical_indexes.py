@@ -2,10 +2,10 @@
 Tests for hierarchical index lookups.
 
 Tests that get() and find() and load() methods work hierarchically, so that:
-- Asset.get(symbol="BTC") can return a Token instance
-- Asset.find(symbol="BTC") can return a Token instance or None
-- Token.get(symbol="ETH") can return an ERC20Token instance
-- Asset.load() loads all descendants (Token, Stock, etc.)
+- Item.get(code="ABC") can return a Widget instance
+- Item.find(code="ABC") can return a Widget instance or None
+- Widget.get(code="XYZ") can return a SpecialWidget instance
+- Item.load() loads all descendants (Widget, Gadget, etc.)
 """
 import pytest
 from m3_graph.link import Link, Backlink
@@ -18,117 +18,117 @@ class TestHierarchicalGet:
     async def test_get_hierarchical_basic(self, graph):
         """Test basic hierarchical get - parent class can retrieve child instances."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             name: str
-            type_unique_attr = ['symbol']
+            type_unique_attr = ['code']
 
-        class Token(Asset):
-            type = "token"
-            contract_address: str | None = None
+        class Widget(Item):
+            type = "widget"
+            serial_number: str | None = None
 
-        class Stock(Asset):
-            type = "stock"
-            exchange: str | None = None
+        class Gadget(Item):
+            type = "gadget"
+            platform: str | None = None
 
         # Create instances
-        btc = Token(source="test", symbol="BTC", name="Bitcoin", contract_address="0xbtc")
-        await btc.insert()
+        abc = Widget(source="test", code="ABC", name="Alpha", serial_number="sn001")
+        await abc.insert()
 
-        tsla = Stock(source="test", symbol="TSLA", name="Tesla", exchange="NASDAQ")
-        await tsla.insert()
+        jkl = Gadget(source="test", code="JKL", name="Gamma", platform="platform_a")
+        await jkl.insert()
 
-        # Asset.get() should find both Token and Stock instances
-        found_btc = Asset.get(symbol="BTC")
-        assert found_btc is btc
-        assert isinstance(found_btc, Token)
+        # Item.get() should find both Widget and Gadget instances
+        found_abc = Item.get(code="ABC")
+        assert found_abc is abc
+        assert isinstance(found_abc, Widget)
 
-        found_tsla = Asset.get(symbol="TSLA")
-        assert found_tsla is tsla
-        assert isinstance(found_tsla, Stock)
+        found_jkl = Item.get(code="JKL")
+        assert found_jkl is jkl
+        assert isinstance(found_jkl, Gadget)
 
-        # Token.get() should only find Token instances
-        found_token = Token.get(symbol="BTC")
-        assert found_token is btc
+        # Widget.get() should only find Widget instances
+        found_widget = Widget.get(code="ABC")
+        assert found_widget is abc
 
-        # Stock.get() should only find Stock instances
-        found_stock = Stock.get(symbol="TSLA")
-        assert found_stock is tsla
+        # Gadget.get() should only find Gadget instances
+        found_gadget = Gadget.get(code="JKL")
+        assert found_gadget is jkl
 
         # Cross-type lookups should fail
         with pytest.raises(KeyError):
-            Token.get(symbol="TSLA")  # TSLA is a Stock, not a Token
+            Widget.get(code="JKL")  # JKL is a Gadget, not a Widget
 
         with pytest.raises(KeyError):
-            Stock.get(symbol="BTC")  # BTC is a Token, not a Stock
+            Gadget.get(code="ABC")  # ABC is a Widget, not a Gadget
 
     async def test_get_hierarchical_three_levels(self, graph):
         """Test hierarchical get with three levels of inheritance."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
-            type_unique_attr = ['symbol']
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+            type_unique_attr = ['code']
 
-        class Token(Asset):
-            type = "token"
-            blockchain: str
+        class Widget(Item):
+            type = "widget"
+            network: str
 
-        class ERC20Token(Token):
-            type = "erc20_token"
+        class SpecialWidget(Widget):
+            type = "special_widget"
             decimals: int
 
-        class WrappedToken(Token):
-            type = "wrapped_token"
-            underlying_symbol: str
+        class CustomWidget(Widget):
+            type = "custom_widget"
+            base_code: str
 
         # Create instances at different levels
-        eth = Token(source="test", symbol="ETH", blockchain="ethereum")
-        await eth.insert()
+        xyz = Widget(source="test", code="XYZ", network="network_a")
+        await xyz.insert()
 
-        usdc = ERC20Token(source="test", symbol="USDC", blockchain="ethereum", decimals=6)
-        await usdc.insert()
+        def_ = SpecialWidget(source="test", code="DEF", network="network_a", decimals=6)
+        await def_.insert()
 
-        weth = WrappedToken(
+        ghi = CustomWidget(
             source="test",
-            symbol="WETH",
-            blockchain="ethereum",
-            underlying_symbol="ETH"
+            code="GHI",
+            network="network_a",
+            base_code="XYZ"
         )
-        await weth.insert()
+        await ghi.insert()
 
-        # Asset.get() should find all three
-        assert Asset.get(symbol="ETH") is eth
-        assert Asset.get(symbol="USDC") is usdc
-        assert Asset.get(symbol="WETH") is weth
+        # Item.get() should find all three
+        assert Item.get(code="XYZ") is xyz
+        assert Item.get(code="DEF") is def_
+        assert Item.get(code="GHI") is ghi
 
-        # Token.get() should find all three (they're all tokens)
-        assert Token.get(symbol="ETH") is eth
-        assert Token.get(symbol="USDC") is usdc
-        assert Token.get(symbol="WETH") is weth
+        # Widget.get() should find all three (they're all widgets)
+        assert Widget.get(code="XYZ") is xyz
+        assert Widget.get(code="DEF") is def_
+        assert Widget.get(code="GHI") is ghi
 
-        # ERC20Token.get() should only find USDC
-        assert ERC20Token.get(symbol="USDC") is usdc
+        # SpecialWidget.get() should only find DEF
+        assert SpecialWidget.get(code="DEF") is def_
         with pytest.raises(KeyError):
-            ERC20Token.get(symbol="ETH")
+            SpecialWidget.get(code="XYZ")
         with pytest.raises(KeyError):
-            ERC20Token.get(symbol="WETH")
+            SpecialWidget.get(code="GHI")
 
-        # WrappedToken.get() should only find WETH
-        assert WrappedToken.get(symbol="WETH") is weth
+        # CustomWidget.get() should only find GHI
+        assert CustomWidget.get(code="GHI") is ghi
         with pytest.raises(KeyError):
-            WrappedToken.get(symbol="ETH")
+            CustomWidget.get(code="XYZ")
         with pytest.raises(KeyError):
-            WrappedToken.get(symbol="USDC")
+            CustomWidget.get(code="DEF")
 
     async def test_get_hierarchical_multi_column_index(self, graph):
         """Test hierarchical get with multi-column unique constraints."""
 
         class Transaction(graph.DBObject):
-            category = "financial"
+            category = "catalog"
             type = "transaction"
             account: str
             date: str
@@ -314,24 +314,24 @@ class TestHierarchicalGet:
     async def test_get_hierarchical_no_match(self, graph):
         """Test that hierarchical get raises appropriate errors when no match found."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
-            type_unique_attr = ['symbol']
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+            type_unique_attr = ['code']
 
-        class Token(Asset):
-            type = "token"
+        class Widget(Item):
+            type = "widget"
 
-        btc = Token(source="test", symbol="BTC")
-        await btc.insert()
+        abc = Widget(source="test", code="ABC")
+        await abc.insert()
 
         # Should raise KeyError when no match found
-        with pytest.raises(KeyError, match="No Asset found"):
-            Asset.get(symbol="NONEXISTENT")
+        with pytest.raises(KeyError, match="No Item found"):
+            Item.get(code="NONEXISTENT")
 
-        with pytest.raises(KeyError, match="No Token found"):
-            Token.get(symbol="NONEXISTENT")
+        with pytest.raises(KeyError, match="No Widget found"):
+            Widget.get(code="NONEXISTENT")
 
     async def test_get_hierarchical_multiple_constraints(self, graph):
         """Test hierarchical get with multiple different constraint types."""
@@ -381,116 +381,116 @@ class TestHierarchicalLoad:
     async def test_load_hierarchical_basic(self, graph):
         """Test that load() loads all descendants."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
-            type_unique_attr = ['symbol']
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+            type_unique_attr = ['code']
 
-        class Token(Asset):
-            type = "token"
+        class Widget(Item):
+            type = "widget"
 
-        class Stock(Asset):
-            type = "stock"
+        class Gadget(Item):
+            type = "gadget"
 
         await graph.maintain()
 
         # Create instances
-        btc = Token(source="test", symbol="BTC")
-        await btc.insert()
+        abc = Widget(source="test", code="ABC")
+        await abc.insert()
 
-        eth = Token(source="test", symbol="ETH")
-        await eth.insert()
+        xyz = Widget(source="test", code="XYZ")
+        await xyz.insert()
 
-        tsla = Stock(source="test", symbol="TSLA")
-        await tsla.insert()
+        jkl = Gadget(source="test", code="JKL")
+        await jkl.insert()
 
         # Clear registry to test loading
         graph.registry.clear()
         graph.registry_type.clear()
 
-        # Asset.load() should load all assets including tokens and stocks
-        await Asset.load()
+        # Item.load() should load all items including widgets and gadgets
+        await Item.load()
         loaded = list(graph.registry.values())
         assert len(loaded) == 3
-        assert any(obj.symbol == "BTC" for obj in loaded)
-        assert any(obj.symbol == "ETH" for obj in loaded)
-        assert any(obj.symbol == "TSLA" for obj in loaded)
+        assert any(obj.code == "ABC" for obj in loaded)
+        assert any(obj.code == "XYZ" for obj in loaded)
+        assert any(obj.code == "JKL" for obj in loaded)
 
         # Verify types
-        btc_loaded = next(obj for obj in loaded if obj.symbol == "BTC")
-        assert isinstance(btc_loaded, Token)
+        abc_loaded = next(obj for obj in loaded if obj.code == "ABC")
+        assert isinstance(abc_loaded, Widget)
 
-        tsla_loaded = next(obj for obj in loaded if obj.symbol == "TSLA")
-        assert isinstance(tsla_loaded, Stock)
+        jkl_loaded = next(obj for obj in loaded if obj.code == "JKL")
+        assert isinstance(jkl_loaded, Gadget)
 
     async def test_load_hierarchical_three_levels(self, graph):
         """Test that load() works with three levels of hierarchy."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        class Token(Asset):
-            type = "token"
+        class Widget(Item):
+            type = "widget"
 
-        class ERC20Token(Token):
-            type = "erc20_token"
+        class SpecialWidget(Widget):
+            type = "special_widget"
 
-        class NFT(Token):
+        class NFT(Widget):
             type = "nft"
 
         await graph.maintain()
 
         # Create instances
-        btc = Token(source="test", symbol="BTC")
-        await btc.insert()
+        abc = Widget(source="test", code="ABC")
+        await abc.insert()
 
-        usdc = ERC20Token(source="test", symbol="USDC")
-        await usdc.insert()
+        def_ = SpecialWidget(source="test", code="DEF")
+        await def_.insert()
 
-        bayc = NFT(source="test", symbol="BAYC")
-        await bayc.insert()
+        nft1 = NFT(source="test", code="NFT1")
+        await nft1.insert()
 
         # Clear registry
         graph.registry.clear()
         graph.registry_type.clear()
 
-        # Asset.load() should load all three
-        await Asset.load()
+        # Item.load() should load all three
+        await Item.load()
         assert len(graph.registry) == 3
 
-        # Token.load() should also load all three (they're all tokens)
+        # Widget.load() should also load all three (they're all widgets)
         graph.registry.clear()
         graph.registry_type.clear()
-        await Token.load()
+        await Widget.load()
         assert len(graph.registry) == 3
 
-        # ERC20Token.load() should only load USDC
+        # SpecialWidget.load() should only load DEF
         graph.registry.clear()
         graph.registry_type.clear()
-        await ERC20Token.load()
+        await SpecialWidget.load()
         assert len(graph.registry) == 1
-        assert list(graph.registry.values())[0].symbol == "USDC"
+        assert list(graph.registry.values())[0].code == "DEF"
 
     async def test_load_hierarchical_includes_related(self, graph):
         """Test that hierarchical load includes related objects."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
         class Company(graph.DBObject):
             category = "entities"
             type = "company"
             name: str
-            issued_tokens: Backlink["Token"]
+            issued_widgets: Backlink["Widget"]
 
-        class Token(Asset):
-            type = "token"
-            issuer: Link[Company, "issued_tokens"] | None = None
+        class Widget(Item):
+            type = "widget"
+            issuer: Link[Company, "issued_widgets"] | None = None
 
         await graph.maintain()
 
@@ -498,64 +498,64 @@ class TestHierarchicalLoad:
         company = Company(source="test", name="Acme Corp")
         await company.insert()
 
-        # Create token linked to company
-        token = Token(source="test", symbol="ACME", issuer=company)
-        await token.insert()
+        # Create widget linked to company
+        widget = Widget(source="test", code="ACME", issuer=company)
+        await widget.insert()
 
         # Clear registry
         graph.registry.clear()
         graph.registry_type.clear()
 
-        await Asset.load()
+        await Item.load()
 
-        # Should load both the token and the related company
+        # Should load both the widget and the related company
         assert len(graph.registry) >= 1
-        assert any(isinstance(obj, Token) for obj in graph.registry.values())
+        assert any(isinstance(obj, Widget) for obj in graph.registry.values())
 
     async def test_load_hierarchical_separate_branches(self, graph):
         """Test that load() respects inheritance boundaries."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
             name: str
 
-        class Token(Asset):
-            type = "token"
+        class Widget(Item):
+            type = "widget"
 
-        class Stock(Asset):
-            type = "stock"
+        class Gadget(Item):
+            type = "gadget"
 
-        class NFT(Token):
+        class NFT(Widget):
             type = "nft"
 
         await graph.maintain()
 
         # Create instances
-        btc = Token(source="test", name="Bitcoin")
-        await btc.insert()
+        abc = Widget(source="test", name="Alpha")
+        await abc.insert()
 
-        bayc = NFT(source="test", name="BAYC")
-        await bayc.insert()
+        nft1 = NFT(source="test", name="NFT1")
+        await nft1.insert()
 
-        tsla = Stock(source="test", name="Tesla")
-        await tsla.insert()
+        jkl = Gadget(source="test", name="Gamma")
+        await jkl.insert()
 
         # Clear registry
         graph.registry.clear()
         graph.registry_type.clear()
 
-        # Token.load() should load Token and NFT, but not Stock
-        await Token.load()
+        # Widget.load() should load Widget and NFT, but not Gadget
+        await Widget.load()
         assert len(graph.registry) == 2
-        assert all(isinstance(obj, Token) for obj in graph.registry.values())
+        assert all(isinstance(obj, Widget) for obj in graph.registry.values())
 
-        # Stock.load() should only load Stock
+        # Gadget.load() should only load Gadget
         graph.registry.clear()
         graph.registry_type.clear()
-        await Stock.load()
+        await Gadget.load()
         assert len(graph.registry) == 1
-        assert isinstance(list(graph.registry.values())[0], Stock)
+        assert isinstance(list(graph.registry.values())[0], Gadget)
 
 
 @pytest.mark.asyncio
@@ -610,39 +610,39 @@ class TestHierarchicalEdgeCases:
     async def test_load_empty_hierarchy(self, graph):
         """Test load() when no objects exist."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
         await graph.maintain()
 
         # Should populate registry with nothing, not error
-        await Asset.load()
+        await Item.load()
         assert len(graph.registry) == 0
 
     async def test_get_hierarchical_error_messages(self, graph):
         """Test that error messages in hierarchical get are helpful."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
-            type_unique_attr = ['symbol']
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+            type_unique_attr = ['code']
 
-        class Token(Asset):
-            type = "token"
+        class Widget(Item):
+            type = "widget"
             address: str
             type_unique_attr = ['address']
 
         # Try to get with wrong constraint
         with pytest.raises(ValueError) as exc:
-            Asset.get(nonexistent="value")
+            Item.get(nonexistent="value")
 
         # Error should mention it checked subclasses
-        assert "Asset or its subclasses" in str(exc.value)
+        assert "Item or its subclasses" in str(exc.value)
         # Should list available constraints from all classes
-        assert "symbol" in str(exc.value)
+        assert "code" in str(exc.value)
         assert "address" in str(exc.value)
 
 
@@ -653,131 +653,131 @@ class TestHierarchicalFind:
     async def test_find_returns_none_when_not_found(self, graph):
         """Test that find() returns None instead of raising KeyError."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
-            type_unique_attr = ['symbol']
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+            type_unique_attr = ['code']
 
-        btc = Asset(source="test", symbol="BTC")
-        await btc.insert()
+        abc = Item(source="test", code="ABC")
+        await abc.insert()
 
         # find() should return the object when found
-        found = Asset.find(symbol="BTC")
-        assert found is btc
+        found = Item.find(code="ABC")
+        assert found is abc
 
         # find() should return None when not found (not raise KeyError)
-        not_found = Asset.find(symbol="ETH")
+        not_found = Item.find(code="XYZ")
         assert not_found is None
 
         # Compare with get() which raises KeyError
-        with pytest.raises(KeyError, match="No Asset found"):
-            Asset.get(symbol="ETH")
+        with pytest.raises(KeyError, match="No Item found"):
+            Item.get(code="XYZ")
 
     async def test_find_hierarchical_basic(self, graph):
         """Test basic hierarchical find - parent class can retrieve child instances."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             name: str
-            type_unique_attr = ['symbol']
+            type_unique_attr = ['code']
 
-        class Token(Asset):
-            type = "token"
-            chain: str
+        class Widget(Item):
+            type = "widget"
+            network_id: str
 
-        class Stock(Asset):
-            type = "stock"
-            exchange: str
+        class Gadget(Item):
+            type = "gadget"
+            platform: str
 
-        btc = Token(source="test", symbol="BTC", name="Bitcoin", chain="BTC")
-        tsla = Stock(source="test", symbol="TSLA", name="Tesla", exchange="NASDAQ")
-        await btc.insert()
-        await tsla.insert()
+        abc = Widget(source="test", code="ABC", name="Alpha", network_id="ABC")
+        jkl = Gadget(source="test", code="JKL", name="Gamma", platform="platform_a")
+        await abc.insert()
+        await jkl.insert()
 
-        # Asset.find() should find both Token and Stock instances
-        found_btc = Asset.find(symbol="BTC")
-        assert found_btc is btc
-        assert isinstance(found_btc, Token)
+        # Item.find() should find both Widget and Gadget instances
+        found_abc = Item.find(code="ABC")
+        assert found_abc is abc
+        assert isinstance(found_abc, Widget)
 
-        found_tsla = Asset.find(symbol="TSLA")
-        assert found_tsla is tsla
-        assert isinstance(found_tsla, Stock)
+        found_jkl = Item.find(code="JKL")
+        assert found_jkl is jkl
+        assert isinstance(found_jkl, Gadget)
 
         # Non-existent should return None
-        not_found = Asset.find(symbol="AAPL")
+        not_found = Item.find(code="AAPL")
         assert not_found is None
 
     async def test_find_hierarchical_scoped_to_subclass(self, graph):
         """Test that find() on subclass only finds that subclass and descendants."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
-            type_unique_attr = ['symbol']
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+            type_unique_attr = ['code']
 
-        class Token(Asset):
-            type = "token"
-            chain: str
+        class Widget(Item):
+            type = "widget"
+            network_id: str
 
-        class Stock(Asset):
-            type = "stock"
-            exchange: str
+        class Gadget(Item):
+            type = "gadget"
+            platform: str
 
-        btc = Token(source="test", symbol="BTC", chain="BTC")
-        tsla = Stock(source="test", symbol="TSLA", exchange="NASDAQ")
-        await btc.insert()
-        await tsla.insert()
+        abc = Widget(source="test", code="ABC", network_id="ABC")
+        jkl = Gadget(source="test", code="JKL", platform="platform_a")
+        await abc.insert()
+        await jkl.insert()
 
-        # Token.find() should find token
-        found_btc = Token.find(symbol="BTC")
-        assert found_btc is btc
+        # Widget.find() should find widget
+        found_abc = Widget.find(code="ABC")
+        assert found_abc is abc
 
-        # Token.find() should return None for stock (not a token)
-        not_found_tsla = Token.find(symbol="TSLA")
-        assert not_found_tsla is None
+        # Widget.find() should return None for gadget (not a widget)
+        not_found_jkl = Widget.find(code="JKL")
+        assert not_found_jkl is None
 
-        # Stock.find() should find stock
-        found_tsla = Stock.find(symbol="TSLA")
-        assert found_tsla is tsla
+        # Gadget.find() should find gadget
+        found_jkl = Gadget.find(code="JKL")
+        assert found_jkl is jkl
 
-        # Stock.find() should return None for token (not a stock)
-        not_found_btc = Stock.find(symbol="BTC")
-        assert not_found_btc is None
+        # Gadget.find() should return None for widget (not a gadget)
+        not_found_abc = Gadget.find(code="ABC")
+        assert not_found_abc is None
 
     async def test_find_with_computed_property(self, graph):
         """Test find() with computed property index."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             name: str
             computed_unique_attr = ['full_name']
 
             @property
             def full_name(self) -> str:
-                return f"{self.symbol}:{self.name}"
+                return f"{self.code}:{self.name}"
 
-        btc = Asset(source="test", symbol="BTC", name="Bitcoin")
-        await btc.insert()
+        abc = Item(source="test", code="ABC", name="Alpha")
+        await abc.insert()
 
         # Should find by computed property
-        found = Asset.find(full_name="BTC:Bitcoin")
-        assert found is btc
+        found = Item.find(full_name="ABC:Alpha")
+        assert found is abc
 
         # Should return None for non-existent
-        not_found = Asset.find(full_name="ETH:Ethereum")
+        not_found = Item.find(full_name="XYZ:Beta")
         assert not_found is None
 
     async def test_find_multi_column_constraint(self, graph):
         """Test find() with multi-column unique constraint."""
 
         class Transaction(graph.DBObject):
-            category = "financial"
+            category = "catalog"
             type = "transaction"
             account: str
             date: str
@@ -820,103 +820,103 @@ class TestHierarchicalFind:
     async def test_find_invalid_constraint_raises_value_error(self, graph):
         """Test that find() raises ValueError for invalid constraints (not KeyError)."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
-            type_unique_attr = ['symbol']
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+            type_unique_attr = ['code']
 
-        btc = Asset(source="test", symbol="BTC")
-        await btc.insert()
+        abc = Item(source="test", code="ABC")
+        await abc.insert()
 
         # Invalid constraint should raise ValueError (same as get())
         with pytest.raises(ValueError, match="No unique constraint"):
-            Asset.find(nonexistent="value")
+            Item.find(nonexistent="value")
 
     async def test_find_deeply_nested_hierarchy(self, graph):
         """Test find() with deeply nested class hierarchy."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
-            type_unique_attr = ['symbol']
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+            type_unique_attr = ['code']
 
-        class Token(Asset):
-            subtype = "token"
-            chain: str
+        class Widget(Item):
+            subtype = "widget"
+            network_id: str
 
-        class ERC20Token(Token):
-            subtype = "erc20"
+        class SpecialWidget(Widget):
+            subtype = "special_widget"
             decimals: int
 
-        class WrappedToken(ERC20Token):
-            subtype = "wrapped"
-            backing_asset: str
+        class CustomWidget(SpecialWidget):
+            subtype = "custom_widget"
+            backing_item: str
 
-        weth = WrappedToken(
+        ghi = CustomWidget(
             source="test",
-            symbol="WETH",
-            chain="ETH",
+            code="GHI",
+            network_id="XYZ",
             decimals=18,
-            backing_asset="ETH"
+            backing_item="XYZ"
         )
-        await weth.insert()
+        await ghi.insert()
 
         # All levels should be able to find it
-        assert Asset.find(symbol="WETH") is weth
-        assert Token.find(symbol="WETH") is weth
-        assert ERC20Token.find(symbol="WETH") is weth
-        assert WrappedToken.find(symbol="WETH") is weth
+        assert Item.find(code="GHI") is ghi
+        assert Widget.find(code="GHI") is ghi
+        assert SpecialWidget.find(code="GHI") is ghi
+        assert CustomWidget.find(code="GHI") is ghi
 
         # Non-existent returns None at all levels
-        assert Asset.find(symbol="DOGE") is None
-        assert Token.find(symbol="DOGE") is None
-        assert ERC20Token.find(symbol="DOGE") is None
-        assert WrappedToken.find(symbol="DOGE") is None
+        assert Item.find(code="DOGE") is None
+        assert Widget.find(code="DOGE") is None
+        assert SpecialWidget.find(code="DOGE") is None
+        assert CustomWidget.find(code="DOGE") is None
 
     async def test_find_vs_get_consistency(self, graph):
         """Test that find() and get() return same object when found."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
-            type_unique_attr = ['symbol']
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+            type_unique_attr = ['code']
 
-        btc = Asset(source="test", symbol="BTC")
-        await btc.insert()
+        abc = Item(source="test", code="ABC")
+        await abc.insert()
 
         # Both should return same instance when found
-        found_with_find = Asset.find(symbol="BTC")
-        found_with_get = Asset.get(symbol="BTC")
-        assert found_with_find is found_with_get is btc
+        found_with_find = Item.find(code="ABC")
+        found_with_get = Item.get(code="ABC")
+        assert found_with_find is found_with_get is abc
 
         # find() returns None, get() raises KeyError when not found
-        assert Asset.find(symbol="ETH") is None
+        assert Item.find(code="XYZ") is None
         with pytest.raises(KeyError):
-            Asset.get(symbol="ETH")
+            Item.get(code="XYZ")
 
     async def test_find_after_index_removal(self, graph):
         """Test find() returns None after object is removed from indexes."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
-            type_unique_attr = ['symbol']
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+            type_unique_attr = ['code']
 
-        btc = Asset(source="test", symbol="BTC")
-        await btc.insert()
+        abc = Item(source="test", code="ABC")
+        await abc.insert()
 
         # Should find before removal
-        assert Asset.find(symbol="BTC") is btc
+        assert Item.find(code="ABC") is abc
 
         # Remove from indexes (simulating deletion cleanup)
-        btc._remove_from_indexes()
+        abc._remove_from_indexes()
 
         # Should return None after removal
-        assert Asset.find(symbol="BTC") is None
+        assert Item.find(code="ABC") is None
 
     async def test_find_with_inherited_constraints(self, graph):
         """Test find() with constraints inherited from base class."""

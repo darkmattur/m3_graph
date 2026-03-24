@@ -113,8 +113,8 @@ await graph.load()  # Loads all objects into memory for fast access
 
 Every object has a three-level classification:
 
-- **Category**: Broad grouping (e.g., "financial", "content", "users")
-- **Type**: Specific object type (e.g., "asset", "post", "user")
+- **Category**: Broad grouping (e.g., "catalog", "content", "users")
+- **Type**: Specific object type (e.g., "item", "post", "user")
 - **Subtype**: Defaults to type, but can differ for variants (e.g., "manager" subtype of "employee" type)
 
 ```python
@@ -297,55 +297,55 @@ premium_users = User.filter(status="active", tier="premium")
 Create type hierarchies and query across inheritance boundaries:
 
 ```python
-class Asset(graph.DBObject):
-    category = "financial"
-    type = "asset"
-    symbol: str
-    type_unique_attr = ["symbol"]
+class Item(graph.DBObject):
+    category = "catalog"
+    type = "item"
+    code: str
+    type_unique_attr = ["code"]
 
-class Token(Asset):
-    type = "token"
-    blockchain: str
+class Widget(Item):
+    type = "widget"
+    color: str
 
-class Stock(Asset):
-    type = "stock"
-    exchange: str
+class Gadget(Item):
+    type = "gadget"
+    voltage: int
 
 # Create instances
-btc = Token(source="import", symbol="BTC", blockchain="ethereum")
-await btc.insert()
+w = Widget(source="import", code="W-100", color="red")
+await w.insert()
 
-tsla = Stock(source="import", symbol="TSLA", exchange="NASDAQ")
-await tsla.insert()
+g = Gadget(source="import", code="G-200", voltage=220)
+await g.insert()
 
 # Parent class queries find descendant instances
-asset = Asset.get(symbol="BTC")  # Returns Token instance
-assert isinstance(asset, Token)
+item = Item.get(code="W-100")  # Returns Widget instance
+assert isinstance(item, Widget)
 
-asset = Asset.get(symbol="TSLA")  # Returns Stock instance
-assert isinstance(asset, Stock)
+item = Item.get(code="G-200")  # Returns Gadget instance
+assert isinstance(item, Gadget)
 
 # Load all descendants
-all_assets = await Asset.load()  # Loads Tokens AND Stocks
+await Item.load()  # Loads Widgets AND Gadgets
 
 # Type-specific queries work as expected
-token = Token.get(symbol="BTC")  # Only finds tokens
+widget = Widget.get(code="W-100")  # Only finds widgets
 ```
 
 **Multi-level inheritance**:
 
 ```python
-class ERC20Token(Token):
-    type = "erc20_token"
-    decimals: int
+class SpecialWidget(Widget):
+    type = "special_widget"
+    precision: int
 
-usdc = ERC20Token(source="import", symbol="USDC", blockchain="ethereum", decimals=6)
-await usdc.insert()
+sw = SpecialWidget(source="import", code="SW-300", color="blue", precision=6)
+await sw.insert()
 
 # All levels work hierarchically
-Asset.get(symbol="USDC")      # Returns ERC20Token instance
-Token.get(symbol="USDC")      # Returns ERC20Token instance
-ERC20Token.get(symbol="USDC") # Returns ERC20Token instance
+Item.get(code="SW-300")           # Returns SpecialWidget instance
+Widget.get(code="SW-300")         # Returns SpecialWidget instance
+SpecialWidget.get(code="SW-300")  # Returns SpecialWidget instance
 ```
 
 ## Advanced Features
@@ -374,7 +374,7 @@ class User(graph.DBObject):
 Load objects with all their related objects in a single query:
 
 ```python
-# Load tokens and all connected objects (issuers, holders, etc.)
+# Load items and all connected objects
 tokens = await Token.load(expand=True)
 ```
 
@@ -690,4 +690,4 @@ pytest
 
 ## License
 
-Proprietary
+MIT

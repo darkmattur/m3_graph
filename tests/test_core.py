@@ -200,107 +200,107 @@ class TestCRUD:
 
     async def test_insert_basic(self, graph):
         """Test basic insert operation."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             name: str
 
-        asset = Asset(source="test", symbol="BTC", name="Bitcoin")
+        item = Item(source="test", code="ABC", name="Alpha")
 
         # Before insert
-        assert asset.id is None
+        assert item.id is None
 
         # Insert
-        await asset.insert()
+        await item.insert()
 
         # After insert
-        assert asset.id is not None
-        assert isinstance(asset.id, int)
-        assert asset.id > 0
+        assert item.id is not None
+        assert isinstance(item.id, int)
+        assert item.id > 0
 
         # Should be in registry
-        assert asset.id in graph.registry
-        assert graph.registry[asset.id] is asset
+        assert item.id in graph.registry
+        assert graph.registry[item.id] is item
 
     async def test_insert_already_inserted_raises_error(self, graph):
         """Test that inserting an already-inserted object raises error."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
+        item = Item(source="test", code="ABC")
+        await item.insert()
 
         # Try to insert again
         with pytest.raises(ValueError, match="existing id"):
-            await asset.insert()
+            await item.insert()
 
     async def test_update_basic(self, graph):
         """Test basic update operation."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             name: str
 
-        asset = Asset(source="test", symbol="BTC", name="Bitcoin")
-        await asset.insert()
+        item = Item(source="test", code="ABC", name="Alpha")
+        await item.insert()
 
-        original_id = asset.id
+        original_id = item.id
 
         # Update name
-        asset.name = "Bitcoin Core"
-        await asset.update()
+        item.name = "Alpha Core"
+        await item.update()
 
         # ID should remain the same
-        assert asset.id == original_id
+        assert item.id == original_id
 
         # Verify update persisted (reload from DB)
         graph.registry.clear()
         await graph.load()
 
         reloaded = graph.registry[original_id]
-        assert reloaded.name == "Bitcoin Core"
+        assert reloaded.name == "Alpha Core"
 
     async def test_update_without_id_raises_error(self, graph):
         """Test that updating object without ID raises error."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
+        item = Item(source="test", code="ABC")
 
         # Try to update without insert
         with pytest.raises(ValueError, match="without id"):
-            await asset.update()
+            await item.update()
 
     async def test_update_preserves_other_fields(self, graph):
         """Test that updating one field doesn't affect others."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
             name: str
 
-        asset = Asset(source="test", symbol="BTC", price=100.0, name="Bitcoin")
-        await asset.insert()
+        item = Item(source="test", code="ABC", price=100.0, name="Alpha")
+        await item.insert()
 
         # Modify only price
-        asset.price = 200.0
-        await asset.update()
+        item.price = 200.0
+        await item.update()
 
         # Reload and verify
         graph.registry.clear()
         await graph.load()
 
-        reloaded = graph.registry[asset.id]
+        reloaded = graph.registry[item.id]
         assert reloaded.price == 200.0
-        assert reloaded.name == "Bitcoin"  # Unchanged
-        assert reloaded.symbol == "BTC"  # Unchanged
+        assert reloaded.name == "Alpha"  # Unchanged
+        assert reloaded.code == "ABC"  # Unchanged
 
     async def test_update_nullable_field_to_none(self, graph):
         """Test updating a field to None."""
@@ -325,88 +325,88 @@ class TestCRUD:
 
     async def test_upsert_insert_path(self, graph):
         """Test upsert when object doesn't have ID (insert path)."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        assert asset.id is None
+        item = Item(source="test", code="ABC")
+        assert item.id is None
 
-        await asset.upsert()
+        await item.upsert()
 
         # Should have inserted
-        assert asset.id is not None
-        assert asset.id in graph.registry
+        assert item.id is not None
+        assert item.id in graph.registry
 
     async def test_upsert_update_path(self, graph):
         """Test upsert when object has ID (update path)."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             name: str
 
-        asset = Asset(source="test", symbol="BTC", name="Bitcoin")
-        await asset.insert()
+        item = Item(source="test", code="ABC", name="Alpha")
+        await item.insert()
 
-        original_id = asset.id
+        original_id = item.id
 
         # Modify and upsert
-        asset.name = "Bitcoin Core"
-        await asset.upsert()
+        item.name = "Alpha Core"
+        await item.upsert()
 
         # Should have updated, not created new
-        assert asset.id == original_id
+        assert item.id == original_id
 
         # Verify
         graph.registry.clear()
         await graph.load()
 
         reloaded = graph.registry[original_id]
-        assert reloaded.name == "Bitcoin Core"
+        assert reloaded.name == "Alpha Core"
 
     async def test_delete_basic(self, graph):
         """Test basic delete operation."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
+        item = Item(source="test", code="ABC")
+        await item.insert()
 
-        asset_id = asset.id
-        assert asset_id in graph.registry
+        item_id = item.id
+        assert item_id in graph.registry
 
         # Delete
-        await asset.delete()
+        await item.delete()
 
         # Should be removed from registry
-        assert asset_id not in graph.registry
-        assert asset.id is None
+        assert item_id not in graph.registry
+        assert item.id is None
 
         # Verify deleted from database
         graph.registry.clear()
         await graph.load()
-        assert asset_id not in graph.registry
+        assert item_id not in graph.registry
 
     async def test_delete_without_id_raises_error(self, graph):
         """Test that deleting object without ID raises error."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
+        item = Item(source="test", code="ABC")
 
         with pytest.raises(ValueError, match="without id"):
-            await asset.delete()
+            await item.delete()
 
     async def test_crud_with_decimal(self, graph):
         """Test CRUD operations preserve Decimal precision."""
         class Account(graph.DBObject):
-            category = "financial"
+            category = "catalog"
             type = "account"
             balance: Decimal
 
@@ -456,166 +456,166 @@ class TestObjectIdentity:
 
     async def test_same_id_returns_same_instance(self, graph):
         """Test that accessing same ID from registry returns same instance."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
+        item = Item(source="test", code="ABC")
+        await item.insert()
 
         # Access from registry
-        from_registry = graph.registry[asset.id]
+        from_registry = graph.registry[item.id]
 
         # Should be the exact same Python object
-        assert from_registry is asset
+        assert from_registry is item
 
     async def test_object_in_registry_after_insert(self, graph):
         """Test that object is added to registry after insert."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
+        item = Item(source="test", code="ABC")
 
         # Not in registry before insert
-        assert asset.id is None
-        assert asset not in graph.registry.values()
+        assert item.id is None
+        assert item not in graph.registry.values()
 
         # In registry after insert
-        await asset.insert()
-        assert asset.id in graph.registry
-        assert graph.registry[asset.id] is asset
+        await item.insert()
+        assert item.id in graph.registry
+        assert graph.registry[item.id] is item
 
     async def test_object_removed_from_registry_after_delete(self, graph):
         """Test that object is removed from registry after delete."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
+        item = Item(source="test", code="ABC")
+        await item.insert()
 
-        asset_id = asset.id
-        assert asset_id in graph.registry
+        item_id = item.id
+        assert item_id in graph.registry
 
         # Remove from registry after delete
-        await asset.delete()
-        assert asset_id not in graph.registry
+        await item.delete()
+        assert item_id not in graph.registry
 
     async def test_object_stays_in_registry_after_update(self, graph):
         """Test that object remains in registry after update."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
 
-        original_instance = asset
+        original_instance = item
 
         # Update
-        asset.price = 200.0
-        await asset.update()
+        item.price = 200.0
+        await item.update()
 
         # Still same instance in registry
-        assert graph.registry[asset.id] is original_instance
+        assert graph.registry[item.id] is original_instance
 
     async def test_type_specific_registry(self, graph):
         """Test type-specific registry management."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
+        item = Item(source="test", code="ABC")
+        await item.insert()
 
         # Should be in type registry
-        assert "asset" in graph.registry_type
-        assert asset.id in graph.registry_type["asset"]
-        assert graph.registry_type["asset"][asset.id] is asset
+        assert "item" in graph.registry_type
+        assert item.id in graph.registry_type["item"]
+        assert graph.registry_type["item"][item.id] is item
 
         # Both registries point to same instance
-        from_main_registry = graph.registry[asset.id]
-        from_type_registry = graph.registry_type["asset"][asset.id]
+        from_main_registry = graph.registry[item.id]
+        from_type_registry = graph.registry_type["item"][item.id]
         assert from_main_registry is from_type_registry
 
     async def test_delete_removes_from_both_registries(self, graph):
         """Test that delete removes object from all registries."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
+        item = Item(source="test", code="ABC")
+        await item.insert()
 
-        asset_id = asset.id
-        assert asset_id in graph.registry
-        assert asset_id in graph.registry_type["asset"]
+        item_id = item.id
+        assert item_id in graph.registry
+        assert item_id in graph.registry_type["item"]
 
-        await asset.delete()
+        await item.delete()
 
-        assert asset_id not in graph.registry
-        assert asset_id not in graph.registry_type.get("asset", {})
+        assert item_id not in graph.registry
+        assert item_id not in graph.registry_type.get("item", {})
 
     async def test_reload_creates_new_instances(self, graph):
         """Test that reloading from database creates new Python instances."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC")
+        await item.insert()
+        item_id = item.id
 
-        original_instance = asset
+        original_instance = item
 
         # Clear and reload
         graph.registry.clear()
         await graph.load()
 
-        reloaded_instance = graph.registry[asset_id]
+        reloaded_instance = graph.registry[item_id]
 
         # Should be different Python objects (new instance)
         assert reloaded_instance is not original_instance
         # But represent same database object
         assert reloaded_instance.id == original_instance.id
-        assert reloaded_instance.symbol == original_instance.symbol
+        assert reloaded_instance.code == original_instance.code
 
     async def test_identity_within_session(self, graph):
         """Test that identity is maintained within each load session."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC")
+        await item.insert()
+        item_id = item.id
 
         # First reload
         graph.registry.clear()
         await graph.load()
-        instance1 = graph.registry[asset_id]
+        instance1 = graph.registry[item_id]
 
         # Access same object multiple times in this session
-        instance1_again = graph.registry[asset_id]
+        instance1_again = graph.registry[item_id]
         assert instance1 is instance1_again
 
         # Second reload (new session)
         graph.registry.clear()
         await graph.load()
-        instance2 = graph.registry[asset_id]
+        instance2 = graph.registry[item_id]
 
         # Within this session, same identity
-        instance2_again = graph.registry[asset_id]
+        instance2_again = graph.registry[item_id]
         assert instance2 is instance2_again
 
         # But different from previous session
@@ -623,17 +623,17 @@ class TestObjectIdentity:
 
     async def test_creating_object_with_id_adds_to_registry(self, graph):
         """Test that creating object with existing ID adds it to registry."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
         # Create object with ID (simulating database load)
-        asset = Asset(id=999, source="test", symbol="BTC")
+        item = Item(id=999, source="test", code="ABC")
 
         # Should be in registry automatically
         assert 999 in graph.registry
-        assert graph.registry[999] is asset
+        assert graph.registry[999] is item
 
 
 @pytest.mark.asyncio
@@ -641,79 +641,79 @@ class TestChangedFlag:
     """Test boolean return values from CRUD operations."""
 
     async def test_insert_returns_true(self, graph):
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        assert await asset.insert() is True
+        item = Item(source="test", code="ABC")
+        assert await item.insert() is True
 
     async def test_update_returns_true_when_changed(self, graph):
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             name: str
 
-        asset = Asset(source="test", symbol="BTC", name="Bitcoin")
-        await asset.insert()
+        item = Item(source="test", code="ABC", name="Alpha")
+        await item.insert()
 
-        asset.name = "Bitcoin Core"
-        assert await asset.update() is True
+        item.name = "Alpha Core"
+        assert await item.update() is True
 
     async def test_update_returns_false_when_unchanged(self, graph):
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             name: str
 
-        asset = Asset(source="test", symbol="BTC", name="Bitcoin")
-        await asset.insert()
+        item = Item(source="test", code="ABC", name="Alpha")
+        await item.insert()
 
-        assert await asset.update() is False
+        assert await item.update() is False
 
     async def test_upsert_insert_path_returns_true(self, graph):
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        assert await asset.upsert() is True
+        item = Item(source="test", code="ABC")
+        assert await item.upsert() is True
 
     async def test_upsert_update_path_returns_true_when_changed(self, graph):
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             name: str
 
-        asset = Asset(source="test", symbol="BTC", name="Bitcoin")
-        await asset.insert()
+        item = Item(source="test", code="ABC", name="Alpha")
+        await item.insert()
 
-        asset.name = "Bitcoin Core"
-        assert await asset.upsert() is True
+        item.name = "Alpha Core"
+        assert await item.upsert() is True
 
     async def test_upsert_update_path_returns_false_when_unchanged(self, graph):
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
+        item = Item(source="test", code="ABC")
+        await item.insert()
 
-        assert await asset.upsert() is False
+        assert await item.upsert() is False
 
     async def test_delete_returns_true(self, graph):
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
+        item = Item(source="test", code="ABC")
+        await item.insert()
 
-        assert await asset.delete() is True
+        assert await item.delete() is True

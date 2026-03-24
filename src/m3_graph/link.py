@@ -21,9 +21,9 @@ class LinkInfo:
 class Link(Generic[T]):
     """
     Type annotation for foreign key relationships:
-        asset: Link[Asset]                 # required link
-        origin: Link[Origin] | None        # nullable link
-        asset: Link[Asset, "listings"]     # with explicit backlink name
+        post: Link[Author]                 # required link
+        editor: Link[User] | None         # nullable link
+        post: Link[Author, "posts"]       # with explicit backlink name
     """
 
     def __class_getitem__(cls, params):

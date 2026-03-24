@@ -20,29 +20,29 @@ class TestIndexes:
     async def test_type_unique_single_column(self, graph):
         """Test single-column unique constraint at type level."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             name: str
-            type_unique_attr = ['symbol']
+            type_unique_attr = ['code']
 
 
-        # Create first asset
-        btc = Asset(source="test", symbol="BTC", name="Bitcoin")
-        await btc.insert()
+        # Create first item
+        abc = Item(source="test", code="ABC", name="Alpha")
+        await abc.insert()
 
         # Index should be populated
-        assert ('symbol',) in Asset._type_indexes
-        idx = Asset._type_indexes[('symbol',)]
-        assert ('BTC',) in idx
-        assert idx[('BTC',)] is btc
+        assert ('code',) in Item._type_indexes
+        idx = Item._type_indexes[('code',)]
+        assert ('ABC',) in idx
+        assert idx[('ABC',)] is abc
 
     async def test_type_unique_multi_column(self, graph):
         """Test multi-column unique constraint at type level."""
 
         class Transaction(graph.DBObject):
-            category = "financial"
+            category = "catalog"
             type = "transaction"
             account: str
             date: str
@@ -171,50 +171,50 @@ class TestIndexes:
     async def test_index_update_on_modification(self, graph):
         """Test that indexes update when object is modified."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             name: str
-            type_unique_attr = ['symbol']
+            type_unique_attr = ['code']
 
 
-        asset = Asset(source="test", symbol="BTC", name="Bitcoin")
-        await asset.insert()
+        item = Item(source="test", code="ABC", name="Alpha")
+        await item.insert()
 
-        idx = Asset._type_indexes[('symbol',)]
-        assert ('BTC',) in idx
+        idx = Item._type_indexes[('code',)]
+        assert ('ABC',) in idx
 
         # Modify symbol
-        asset.symbol = "BTCUSD"
-        asset._remove_from_indexes()
-        asset._update_indexes()
+        item.code = "ABCUSD"
+        item._remove_from_indexes()
+        item._update_indexes()
 
         # Old key should be gone, new key should exist
-        assert ('BTC',) not in idx
-        assert ('BTCUSD',) in idx
-        assert idx[('BTCUSD',)] is asset
+        assert ('ABC',) not in idx
+        assert ('ABCUSD',) in idx
+        assert idx[('ABCUSD',)] is item
 
     async def test_index_cleanup_on_deletion(self, graph):
         """Test that indexes are cleaned up when object is deleted."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
-            type_unique_attr = ['symbol']
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+            type_unique_attr = ['code']
 
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
+        item = Item(source="test", code="ABC")
+        await item.insert()
 
-        idx = Asset._type_indexes[('symbol',)]
-        assert ('BTC',) in idx
+        idx = Item._type_indexes[('code',)]
+        assert ('ABC',) in idx
 
         # Delete and cleanup
-        asset._remove_from_indexes()
+        item._remove_from_indexes()
 
-        assert ('BTC',) not in idx
+        assert ('ABC',) not in idx
 
     async def test_inherited_constraints(self, graph):
         """Test that unique constraints are inherited from base classes."""
@@ -265,24 +265,24 @@ class TestIndexes:
     async def test_index_registration_at_init(self, graph):
         """Test that objects with IDs are automatically registered in indexes."""
 
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
-            type_unique_attr = ['symbol']
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+            type_unique_attr = ['code']
 
 
         # Create object with ID (simulating loaded from DB)
-        asset = Asset(id=100, source="test", symbol="BTC")
+        item = Item(id=100, source="test", code="ABC")
 
         # Should be in registry
         assert 100 in graph.registry
-        assert graph.registry[100] is asset
+        assert graph.registry[100] is item
 
         # Should be in index
-        idx = Asset._type_indexes[('symbol',)]
-        assert ('BTC',) in idx
-        assert idx[('BTC',)] is asset
+        idx = Item._type_indexes[('code',)]
+        assert ('ABC',) in idx
+        assert idx[('ABC',)] is item
 
     async def test_composite_index_with_different_types(self, graph):
         """Test composite index with different data types."""
@@ -514,28 +514,28 @@ class TestIndexEdgeCases:
 
     async def test_index_removal_on_modification_failure(self, graph):
         """Test that index stays consistent if setattr fails during modification."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
-            type_unique_attr = ['symbol']
+            type_unique_attr = ['code']
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
 
-        idx = Asset._type_indexes[('symbol',)]
-        assert ('BTC',) in idx
+        idx = Item._type_indexes[('code',)]
+        assert ('ABC',) in idx
 
         # Try to set invalid value (should fail Pydantic validation)
         try:
-            asset.price = "invalid"  # Wrong type
+            item.price = "invalid"  # Wrong type
         except Exception:
             pass
 
         # Index should still be consistent
-        assert ('BTC',) in idx
-        assert idx[('BTC',)] is asset
+        assert ('ABC',) in idx
+        assert idx[('ABC',)] is item
 
     async def test_index_cleanup_on_type_change(self, graph):
         """Test index cleanup when object type changes (if supported)."""

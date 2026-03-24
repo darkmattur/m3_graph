@@ -160,75 +160,75 @@ class TestHistoryTracking:
 
     async def test_history_on_insert(self, graph):
         """Test that history entry is created on insert."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
+        item = Item(source="test", code="ABC")
+        await item.insert()
 
         # Check history table
         history = await graph._conn.query(
             f"SELECT * FROM {graph._schema}.history WHERE id = %(id)s",
-            id=asset.id
+            id=item.id
         )
 
         assert len(history) == 1
-        assert history[0]['id'] == asset.id
-        assert history[0]['attr']['symbol'] == "BTC"
+        assert history[0]['id'] == item.id
+        assert history[0]['attr']['code'] == "ABC"
         assert history[0]['deleted'] is False
 
     async def test_history_on_update(self, graph):
         """Test that history is tracked on update."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             name: str
 
-        asset = Asset(source="test", symbol="BTC", name="Bitcoin")
-        await asset.insert()
+        item = Item(source="test", code="ABC", name="Alpha")
+        await item.insert()
 
         # Update
-        asset.name = "Bitcoin Core"
-        await asset.update()
+        item.name = "Alpha Core"
+        await item.update()
 
         # Check history - should have 2 entries
         history = await graph._conn.query(
             f"SELECT * FROM {graph._schema}.history WHERE id = %(id)s ORDER BY validity",
-            id=asset.id
+            id=item.id
         )
 
         assert len(history) == 2
 
         # First entry should have old value with closed validity
-        assert history[0]['attr']['name'] == "Bitcoin"
+        assert history[0]['attr']['name'] == "Alpha"
         assert history[0]['validity'].upper != 'infinity'
 
         # Second entry should have new value with open validity
-        assert history[1]['attr']['name'] == "Bitcoin Core"
+        assert history[1]['attr']['name'] == "Alpha Core"
         assert history[1]['validity'].upper == 'infinity'
 
     async def test_history_on_delete(self, graph):
         """Test that history is updated on delete."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
+        item = Item(source="test", code="ABC")
+        await item.insert()
 
-        asset_id = asset.id
+        item_id = item.id
 
         # Delete
-        await asset.delete()
+        await item.delete()
 
         # Check history - validity should be closed
         history = await graph._conn.query(
             f"SELECT * FROM {graph._schema}.history WHERE id = %(id)s",
-            id=asset_id
+            id=item_id
         )
 
         assert len(history) == 1
@@ -236,22 +236,22 @@ class TestHistoryTracking:
 
     async def test_history_no_change_no_entry(self, graph):
         """Test that history doesn't create new entry if nothing changed."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             name: str
 
-        asset = Asset(source="test", symbol="BTC", name="Bitcoin")
-        await asset.insert()
+        item = Item(source="test", code="ABC", name="Alpha")
+        await item.insert()
 
         # Update with same values
-        await asset.update()
+        await item.update()
 
         # Should still have only 1 history entry
         history = await graph._conn.query(
             f"SELECT * FROM {graph._schema}.history WHERE id = %(id)s",
-            id=asset.id
+            id=item.id
         )
 
         assert len(history) == 1
@@ -293,43 +293,43 @@ class TestErrorHandling:
 
     async def test_insert_object_twice_raises_error(self, graph):
         """Test that inserting an already-inserted object raises error."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
+        item = Item(source="test", code="ABC")
+        await item.insert()
 
         # Try to insert again
         with pytest.raises(ValueError, match="existing id"):
-            await asset.insert()
+            await item.insert()
 
     async def test_update_without_id_raises_error(self, graph):
         """Test that updating object without ID raises error."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
+        item = Item(source="test", code="ABC")
 
         # Try to update without inserting first
         with pytest.raises(ValueError, match="without id"):
-            await asset.update()
+            await item.update()
 
     async def test_delete_without_id_raises_error(self, graph):
         """Test that deleting object without ID raises error."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
+        item = Item(source="test", code="ABC")
 
         # Try to delete without inserting first
         with pytest.raises(ValueError, match="without id"):
-            await asset.delete()
+            await item.delete()
 
     async def test_required_relationship_cannot_be_none(self, graph):
         """Test that required relationships cannot be set to None."""
@@ -553,27 +553,27 @@ class TestErrorHandling:
 
     async def test_invalid_type_for_field_raises_validation_error(self, graph):
         """Test that invalid type for field raises Pydantic validation error."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
         # Try to create with wrong type
         with pytest.raises(ValidationError):
-            Asset(source="test", symbol="BTC", price="not_a_number")
+            Item(source="test", code="ABC", price="not_a_number")
 
     async def test_missing_required_field_raises_error(self, graph):
         """Test that missing required field raises validation error."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float  # Required
 
         # Try to create without required field
         with pytest.raises(ValidationError):
-            Asset(source="test", symbol="BTC")
+            Item(source="test", code="ABC")
 
     async def test_type_mismatch_in_complex_field(self, graph):
         """Test validation error for complex field type mismatch."""
@@ -622,20 +622,20 @@ class TestErrorHandling:
 
     async def test_delete_already_deleted_object(self, graph):
         """Test deleting an already-deleted object raises error."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
+        item = Item(source="test", code="ABC")
+        await item.insert()
 
         # Delete once
-        await asset.delete()
+        await item.delete()
 
         # Try to delete again - id is None now
         with pytest.raises(ValueError, match="without id"):
-            await asset.delete()
+            await item.delete()
 
 
 @pytest.mark.asyncio
@@ -644,14 +644,14 @@ class TestDatabaseIntegrity:
 
     async def test_load_skips_unregistered_types(self, graph, db_connection, test_schema):
         """Test that loading skips objects with unregistered types."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
         # Insert a known type
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
+        item = Item(source="test", code="ABC")
+        await item.insert()
 
         # Manually insert an unregistered type
         await db_connection.execute(
@@ -668,7 +668,7 @@ class TestDatabaseIntegrity:
 
         # Should only load the registered type
         assert len(graph.registry) == 1
-        assert asset.id in graph.registry
+        assert item.id in graph.registry
 
     async def test_load_with_malformed_relationships(self, graph):
         """Test loading objects with relationships that reference non-existent IDs."""
@@ -707,19 +707,19 @@ class TestDatabaseIntegrity:
 
     async def test_accessing_deleted_object_from_registry(self, graph):
         """Test that deleted object is removed from registry."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset = Asset(source="test", symbol="BTC")
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC")
+        await item.insert()
+        item_id = item.id
 
-        await asset.delete()
+        await item.delete()
 
         # Should not be in registry
-        assert asset_id not in graph.registry
+        assert item_id not in graph.registry
 
 
 @pytest.mark.asyncio
@@ -834,7 +834,7 @@ class TestDataIntegrity:
         from decimal import Decimal
 
         class Account(graph.DBObject):
-            category = "financial"
+            category = "catalog"
             type = "account"
             balance: Decimal
 
@@ -1770,117 +1770,117 @@ class TestTypeInheritance:
         """
         Test complex pattern where branches recombine via multiple inheritance.
 
-        Structure mirrors real EVM blockchain types:
-                Origin                SmartContract
+        Demonstrates diamond inheritance pattern:
+                Source                Program
                   |                         |
-                Chain               EVMSmartContract
+                Network               PlatformProgram
                   |                         |
-             ChainListing                  /
+             NetworkEntry                  /
                   |   \\                  /
                   |    \\                /
                   |     \\              /
                   |      \\            /
-             ERC1155    ERC20 (inherits from both ChainListing and EVMSmartContract)
+             SpecialGadget    SpecialWidget (inherits from both NetworkEntry and PlatformProgram)
         """
-        class Origin(graph.DBObject):
-            category = "listing"
-            type = "origin"
+        class Source(graph.DBObject):
+            category = "registry"
+            type = "source"
             name: str
 
-        class Chain(Origin):
-            type = "chain"
-            chain_name: str
+        class Network(Source):
+            type = "network"
+            network_name: str
 
-        class ChainListing(graph.DBObject):
-            category = "listing"
-            type = "on_chain"
-            asset: str | None = None
+        class NetworkEntry(graph.DBObject):
+            category = "registry"
+            type = "on_network"
+            item_ref: str | None = None
 
-        class SmartContract(graph.DBObject):
-            category = "smart_contract"
-            type = "smart_contract"
+        class Program(graph.DBObject):
+            category = "program"
+            type = "program"
             name: str
 
-        class EVMSmartContract(SmartContract):
-            type = "evm_smart_contract"
+        class PlatformProgram(Program):
+            type = "platform_program"
             address: str | None = None
 
-        # ERC20 inherits from BOTH ChainListing and EVMSmartContract
-        class ERC20(ChainListing, EVMSmartContract):
-            subtype = "erc_20"
+        # SpecialWidget inherits from BOTH NetworkEntry and PlatformProgram
+        class SpecialWidget(NetworkEntry, PlatformProgram):
+            subtype = "special_widget"
             decimals: int | None = None
 
-        # ERC1155 only inherits from ChainListing
-        class ERC1155(ChainListing):
-            type = "erc_1155"
-            token_id: int | None = None
+        # SpecialGadget only inherits from NetworkEntry
+        class SpecialGadget(NetworkEntry):
+            type = "special_gadget"
+            entry_id: int | None = None
 
         # Register all types
-        await Origin.maintain()
-        await Chain.maintain()
-        await ChainListing.maintain()
-        await SmartContract.maintain()
-        await EVMSmartContract.maintain()
-        await ERC20.maintain()
-        await ERC1155.maintain()
+        await Source.maintain()
+        await Network.maintain()
+        await NetworkEntry.maintain()
+        await Program.maintain()
+        await PlatformProgram.maintain()
+        await SpecialWidget.maintain()
+        await SpecialGadget.maintain()
 
         # Fetch metadata
-        origin_meta = await graph._conn.query(
-            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'origin'"
+        source_meta = await graph._conn.query(
+            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'source'"
         )
-        chain_meta = await graph._conn.query(
-            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'chain'"
+        network_meta = await graph._conn.query(
+            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'network'"
         )
-        on_chain_meta = await graph._conn.query(
-            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'on_chain'"
+        on_network_meta = await graph._conn.query(
+            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'on_network'"
         )
-        smart_contract_meta = await graph._conn.query(
-            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'smart_contract'"
+        program_meta = await graph._conn.query(
+            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'program'"
         )
-        evm_sc_meta = await graph._conn.query(
-            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'evm_smart_contract'"
+        platform_prog_meta = await graph._conn.query(
+            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'platform_program'"
         )
-        erc20_meta = await graph._conn.query(
-            f"SELECT type, subtype, parent_types, descendant_types FROM {graph._schema}.meta WHERE category = 'listing' AND subtype = 'erc_20'"
+        special_widget_meta = await graph._conn.query(
+            f"SELECT type, subtype, parent_types, descendant_types FROM {graph._schema}.meta WHERE category = 'registry' AND subtype = 'special_widget'"
         )
-        erc1155_meta = await graph._conn.query(
-            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'erc_1155'"
+        special_gadget_meta = await graph._conn.query(
+            f"SELECT parent_types, descendant_types FROM {graph._schema}.meta WHERE type = 'special_gadget'"
         )
 
         # Verify parent chains
-        assert origin_meta[0]['parent_types'] == []
-        assert set(chain_meta[0]['parent_types']) == {'origin'}
-        assert on_chain_meta[0]['parent_types'] == []
-        assert smart_contract_meta[0]['parent_types'] == []
-        assert set(evm_sc_meta[0]['parent_types']) == {'smart_contract'}
+        assert source_meta[0]['parent_types'] == []
+        assert set(network_meta[0]['parent_types']) == {'source'}
+        assert on_network_meta[0]['parent_types'] == []
+        assert program_meta[0]['parent_types'] == []
+        assert set(platform_prog_meta[0]['parent_types']) == {'program'}
 
-        # ERC20 inherits from both ChainListing (type='on_chain') and EVMSmartContract
-        # Since ERC20 doesn't override 'type', it inherits type='on_chain' from ChainListing
-        # parent_types only includes ancestors with DIFFERENT type values, so 'on_chain' is excluded
-        # Therefore parent_types = {'evm_smart_contract', 'smart_contract'}
-        assert erc20_meta[0]['type'] == 'on_chain'
-        assert erc20_meta[0]['subtype'] == 'erc_20'
-        assert set(erc20_meta[0]['parent_types']) == {'evm_smart_contract', 'smart_contract', 'on_chain'}
+        # SpecialWidget inherits from both NetworkEntry (type='on_network') and PlatformProgram
+        # Since SpecialWidget doesn't override 'type', it inherits type='on_network' from NetworkEntry
+        # parent_types only includes ancestors with DIFFERENT type values, so 'on_network' is excluded
+        # Therefore parent_types = {'platform_program', 'program'}
+        assert special_widget_meta[0]['type'] == 'on_network'
+        assert special_widget_meta[0]['subtype'] == 'special_widget'
+        assert set(special_widget_meta[0]['parent_types']) == {'platform_program', 'program', 'on_network'}
 
-        # ERC1155 only has on_chain as parent
-        assert set(erc1155_meta[0]['parent_types']) == {'on_chain'}
+        # SpecialGadget only has on_network as parent
+        assert set(special_gadget_meta[0]['parent_types']) == {'on_network'}
 
         # Verify descendant chains
-        # Origin branch: origin -> chain (no ERC types since they inherit from ChainListing, not Chain)
-        assert set(origin_meta[0]['descendant_types']) == {'origin', 'chain'}
-        assert chain_meta[0]['descendant_types'] == ['chain']
+        # Source branch: source -> network (no ERC types since they inherit from NetworkEntry, not Network)
+        assert set(source_meta[0]['descendant_types']) == {'source', 'network'}
+        assert network_meta[0]['descendant_types'] == ['network']
 
-        # ChainListing branch: on_chain -> erc_20, erc_1155
-        # descendant_types contains SUBTYPES, so 'erc_20' appears (not just 'on_chain')
-        assert set(on_chain_meta[0]['descendant_types']) == {'on_chain', 'erc_20', 'erc_1155'}
+        # NetworkEntry branch: on_network -> special_widget, special_gadget
+        # descendant_types contains SUBTYPES, so 'special_widget' appears (not just 'on_network')
+        assert set(on_network_meta[0]['descendant_types']) == {'on_network', 'special_widget', 'special_gadget'}
 
-        # SmartContract branch: smart_contract -> evm_smart_contract -> erc_20 (via multiple inheritance)
-        # ERC20 (subtype='erc_20') inherits from EVMSmartContract, so it appears in descendants
-        assert set(smart_contract_meta[0]['descendant_types']) == {'smart_contract', 'evm_smart_contract', 'erc_20'}
-        assert set(evm_sc_meta[0]['descendant_types']) == {'evm_smart_contract', 'erc_20'}
+        # Program branch: program -> platform_program -> special_widget (via multiple inheritance)
+        # SpecialWidget (subtype='special_widget') inherits from PlatformProgram, so it appears in descendants
+        assert set(program_meta[0]['descendant_types']) == {'program', 'platform_program', 'special_widget'}
+        assert set(platform_prog_meta[0]['descendant_types']) == {'platform_program', 'special_widget'}
 
         # Leaf nodes have only themselves
-        assert erc1155_meta[0]['descendant_types'] == ['erc_1155']
+        assert special_gadget_meta[0]['descendant_types'] == ['special_gadget']
 
     async def test_complex_dag_with_cross_branch_inheritance(self, graph):
         """
@@ -2677,26 +2677,26 @@ class TestObjectQuerying:
 
     async def test_get_by_computed_property(self, graph):
         """Test get() with a computed property index."""
-        class Asset(graph.DBObject):
+        class Item(graph.DBObject):
             category = "test"
-            type = "asset"
-            symbol: str
+            type = "item"
+            code: str
             name: str
             computed_unique_attr = ["full_name"]
 
             @property
             def full_name(self):
-                return f"{self.symbol}:{self.name}"
+                return f"{self.code}:{self.name}"
 
-        await Asset.maintain()
+        await Item.maintain()
 
-        asset = Asset(source="test", symbol="BTC", name="Bitcoin")
-        await asset.insert()
+        item = Item(source="test", code="ABC", name="Alpha")
+        await item.insert()
 
         # Get by computed property
-        found = Asset.get(full_name="BTC:Bitcoin")
+        found = Item.get(full_name="ABC:Alpha")
 
-        assert found is asset
+        assert found is item
 
     async def test_get_raises_keyerror_when_not_found(self, graph):
         """Test that get() raises KeyError when object not found."""

@@ -19,71 +19,71 @@ class TestInMemoryState:
 
     async def test_in_memory_changes_visible_immediately(self, graph):
         """Test that in-memory changes are immediately visible."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
 
         # Modify in-memory
-        asset.price = 200.0
+        item.price = 200.0
 
         # Should be visible immediately
-        assert asset.price == 200.0
+        assert item.price == 200.0
 
     async def test_in_memory_changes_not_persisted_without_update(self, graph):
         """Test that in-memory changes don't persist without update()."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
 
         # Modify in-memory but don't update
-        asset.price = 200.0
+        item.price = 200.0
 
         # Reload from database
         graph.registry.clear()
         await graph.load()
 
-        reloaded = graph.registry[asset.id]
+        reloaded = graph.registry[item.id]
         assert reloaded.price == 100.0  # Should be original value
 
     async def test_multiple_in_memory_changes_before_persist(self, graph):
         """Test multiple in-memory modifications before calling update()."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
             name: str
 
-        asset = Asset(source="test", symbol="BTC", price=100.0, name="Bitcoin")
-        await asset.insert()
+        item = Item(source="test", code="ABC", price=100.0, name="Alpha")
+        await item.insert()
 
         # Multiple in-memory changes
-        asset.price = 200.0
-        asset.price = 300.0
-        asset.name = "Bitcoin Core"
-        asset.price = 400.0
+        item.price = 200.0
+        item.price = 300.0
+        item.name = "Alpha Core"
+        item.price = 400.0
 
         # All changes visible in-memory
-        assert asset.price == 400.0
-        assert asset.name == "Bitcoin Core"
+        assert item.price == 400.0
+        assert item.name == "Alpha Core"
 
         # But not in database yet
         graph.registry.clear()
         await graph.load()
 
-        reloaded = graph.registry[asset.id]
+        reloaded = graph.registry[item.id]
         assert reloaded.price == 100.0
-        assert reloaded.name == "Bitcoin"
+        assert reloaded.name == "Alpha"
 
     async def test_complex_type_in_memory_mutation(self, graph):
         """Test in-memory mutation of complex types (lists, dicts)."""
@@ -124,79 +124,79 @@ class TestDatabasePersistence:
 
     async def test_update_persists_in_memory_changes(self, graph):
         """Test that update() persists in-memory changes to database."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
 
         # Modify and persist
-        asset.price = 200.0
-        await asset.update()
+        item.price = 200.0
+        await item.update()
 
         # Verify persisted
         graph.registry.clear()
         await graph.load()
 
-        reloaded = graph.registry[asset.id]
+        reloaded = graph.registry[item.id]
         assert reloaded.price == 200.0
 
     async def test_multiple_sequential_updates(self, graph):
         """Test multiple sequential update() calls."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
 
         # First update
-        asset.price = 200.0
-        await asset.update()
+        item.price = 200.0
+        await item.update()
 
         # Second update
-        asset.price = 300.0
-        await asset.update()
+        item.price = 300.0
+        await item.update()
 
         # Third update
-        asset.price = 400.0
-        await asset.update()
+        item.price = 400.0
+        await item.update()
 
         # Verify final state
         graph.registry.clear()
         await graph.load()
 
-        reloaded = graph.registry[asset.id]
+        reloaded = graph.registry[item.id]
         assert reloaded.price == 400.0
 
     async def test_save_then_modify_then_reload(self, graph):
         """Test saving, modifying in-memory, then reloading."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
 
         # First update
-        asset.price = 200.0
-        await asset.update()
+        item.price = 200.0
+        await item.update()
 
         # More in-memory changes (not saved)
-        asset.price = 300.0
+        item.price = 300.0
 
         # Reload should get the last saved state
         graph.registry.clear()
         await graph.load()
 
-        reloaded = graph.registry[asset.id]
+        reloaded = graph.registry[item.id]
         assert reloaded.price == 200.0  # Last saved, not in-memory value
 
 
@@ -206,51 +206,51 @@ class TestReloadAndRollback:
 
     async def test_reload_discards_in_memory_changes(self, graph):
         """Test that reloading discards unsaved in-memory changes."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
+        item_id = item.id
 
         # Make in-memory changes
-        asset.price = 200.0
-        assert asset.price == 200.0
+        item.price = 200.0
+        assert item.price == 200.0
 
         # Reload from database (discards changes)
         graph.registry.clear()
         await graph.load()
 
-        reloaded = graph.registry[asset_id]
+        reloaded = graph.registry[item_id]
         assert reloaded.price == 100.0
 
     async def test_reload_after_partial_changes(self, graph):
         """Test reload after making partial changes to multiple fields."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
             name: str
 
-        asset = Asset(source="test", symbol="BTC", price=100.0, name="Bitcoin")
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC", price=100.0, name="Alpha")
+        await item.insert()
+        item_id = item.id
 
         # Change multiple fields in-memory
-        asset.price = 200.0
-        asset.name = "Bitcoin Core"
+        item.price = 200.0
+        item.name = "Alpha Core"
 
         # Reload discards all changes
         graph.registry.clear()
         await graph.load()
 
-        reloaded = graph.registry[asset_id]
+        reloaded = graph.registry[item_id]
         assert reloaded.price == 100.0
-        assert reloaded.name == "Bitcoin"
+        assert reloaded.name == "Alpha"
 
 
 @pytest.mark.asyncio
@@ -259,48 +259,48 @@ class TestDatabaseAsSourceOfTruth:
 
     async def test_load_reflects_database_state(self, graph):
         """Test that load() loads current database state."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
+        item_id = item.id
 
         # Modify directly in database
         await graph._conn.execute(
-            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(asset_id)s",
-            asset_id=asset_id
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(item_id)s",
+            item_id=item_id
         )
 
         # Load should reflect database change
         graph.registry.clear()
         await graph.load()
 
-        reloaded = graph.registry[asset_id]
+        reloaded = graph.registry[item_id]
         assert reloaded.price == 200.0
 
     async def test_load_after_external_insert(self, graph):
         """Test loading objects inserted externally to current session."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
         # Insert via ORM
-        asset1 = Asset(source="test", symbol="BTC")
+        asset1 = Item(source="test", code="ABC")
         await asset1.insert()
 
         # Insert directly via database
         result = await graph._conn.query(
             f"""
             INSERT INTO {graph._schema}.object (category, type, subtype, attr, source)
-            VALUES ('financial', 'asset', 'asset', %(attr)s, 'test')
+            VALUES ('catalog', 'item', 'item', %(attr)s, 'test')
             RETURNING id
             """,
-            attr={"symbol": "ETH"}
+            attr={"code": "XYZ"}
         )
         asset2_id = result[0]['id']
 
@@ -315,13 +315,13 @@ class TestDatabaseAsSourceOfTruth:
 
     async def test_load_after_external_delete(self, graph):
         """Test that load() handles externally deleted objects."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset1 = Asset(source="test", symbol="BTC")
-        asset2 = Asset(source="test", symbol="ETH")
+        asset1 = Item(source="test", code="ABC")
+        asset2 = Item(source="test", code="XYZ")
         await asset1.insert()
         await asset2.insert()
 
@@ -345,23 +345,23 @@ class TestDatabaseAsSourceOfTruth:
 
     async def test_load_after_external_update(self, graph):
         """Test that load() picks up external updates."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
+        item_id = item.id
 
         # Hold reference to original object
-        original = asset
+        original = item
 
         # Update directly in database
         await graph._conn.execute(
-            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '500.0') WHERE id = %(asset_id)s",
-            asset_id=asset_id
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '500.0') WHERE id = %(item_id)s",
+            item_id=item_id
         )
 
         # Original object still has old value
@@ -371,7 +371,7 @@ class TestDatabaseAsSourceOfTruth:
         graph.registry.clear()
         await graph.load()
 
-        reloaded = graph.registry[asset_id]
+        reloaded = graph.registry[item_id]
         assert reloaded.price == 500.0
         assert reloaded is not original
 
@@ -382,57 +382,57 @@ class TestStaleData:
 
     async def test_in_memory_object_can_become_stale(self, graph):
         """Test that in-memory object can have stale data."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
+        item_id = item.id
 
         # Modify directly in database
         await graph._conn.execute(
-            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(asset_id)s",
-            asset_id=asset_id
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(item_id)s",
+            item_id=item_id
         )
 
         # In-memory object is now stale
-        assert asset.price == 100.0  # Stale value
+        assert item.price == 100.0  # Stale value
 
         # Database has different value
         graph.registry.clear()
         await graph.load()
-        fresh = graph.registry[asset_id]
+        fresh = graph.registry[item_id]
         assert fresh.price == 200.0
 
     async def test_updating_stale_object_overwrites_database(self, graph):
         """Test that updating a stale object overwrites database (last write wins)."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
+        item_id = item.id
 
         # Simulate external modification
         await graph._conn.execute(
-            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(asset_id)s",
-            asset_id=asset_id
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '200.0') WHERE id = %(item_id)s",
+            item_id=item_id
         )
 
         # Update stale in-memory object
-        asset.price = 150.0
-        await asset.update()
+        item.price = 150.0
+        await item.update()
 
         # Database should have 150.0 (last write wins)
         graph.registry.clear()
         await graph.load()
-        reloaded = graph.registry[asset_id]
+        reloaded = graph.registry[item_id]
         assert reloaded.price == 150.0  # Not 200.0
 
 
@@ -442,87 +442,87 @@ class TestConsistency:
 
     async def test_consistency_after_full_crud_lifecycle(self, graph):
         """Test consistency through full CRUD lifecycle."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
         # Insert
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
+        item_id = item.id
 
         # Verify in database
         graph.registry.clear()
         await graph.load()
-        assert asset_id in graph.registry
+        assert item_id in graph.registry
 
         # Update
-        asset_from_db = graph.registry[asset_id]
-        asset_from_db.price = 200.0
-        await asset_from_db.update()
+        item_from_db = graph.registry[item_id]
+        item_from_db.price = 200.0
+        await item_from_db.update()
 
         # Verify update
         graph.registry.clear()
         await graph.load()
-        assert graph.registry[asset_id].price == 200.0
+        assert graph.registry[item_id].price == 200.0
 
         # Delete
-        asset_to_delete = graph.registry[asset_id]
-        await asset_to_delete.delete()
+        item_to_delete = graph.registry[item_id]
+        await item_to_delete.delete()
 
         # Verify deletion
         graph.registry.clear()
         await graph.load()
-        assert asset_id not in graph.registry
+        assert item_id not in graph.registry
 
     async def test_consistency_with_mixed_operations(self, graph):
         """Test consistency when mixing in-memory and database operations."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        # Create multiple assets
-        btc = Asset(source="test", symbol="BTC", price=100.0)
-        eth = Asset(source="test", symbol="ETH", price=50.0)
-        await btc.insert()
-        await eth.insert()
+        # Create multiple items
+        abc = Item(source="test", code="ABC", price=100.0)
+        xyz = Item(source="test", code="XYZ", price=50.0)
+        await abc.insert()
+        await xyz.insert()
 
         # Modify BTC in-memory and persist
-        btc.price = 200.0
-        await btc.update()
+        abc.price = 200.0
+        await abc.update()
 
         # Modify ETH directly in database
         await graph._conn.execute(
-            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '75.0') WHERE id = %(eth_id)s",
-            eth_id=eth.id
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '75.0') WHERE id = %(xyz_id)s",
+            xyz_id=xyz.id
         )
 
         # Load and verify
         graph.registry.clear()
         await graph.load()
 
-        btc_reloaded = graph.registry[btc.id]
-        eth_reloaded = graph.registry[eth.id]
+        abc_reloaded = graph.registry[abc.id]
+        xyz_reloaded = graph.registry[xyz.id]
 
-        assert btc_reloaded.price == 200.0
-        assert eth_reloaded.price == 75.0
+        assert abc_reloaded.price == 200.0
+        assert xyz_reloaded.price == 75.0
 
     async def test_object_state_across_multiple_sessions(self, graph):
         """Test that object state is consistent across multiple load cycles."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
         # Create and save
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
-        original_id = asset.id
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
+        original_id = item.id
 
         # Session 1: Load and modify, then save
         graph.registry.clear()
@@ -552,34 +552,34 @@ class TestConsistency:
 
     async def test_in_memory_state_independence_per_object(self, graph):
         """Test that in-memory state is independent per object instance."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        # Create two different assets
-        btc = Asset(source="test", symbol="BTC", price=100.0)
-        eth = Asset(source="test", symbol="ETH", price=50.0)
-        await btc.insert()
-        await eth.insert()
+        # Create two different items
+        abc = Item(source="test", code="ABC", price=100.0)
+        xyz = Item(source="test", code="XYZ", price=50.0)
+        await abc.insert()
+        await xyz.insert()
 
         # Modify both in-memory
-        btc.price = 200.0
-        eth.price = 100.0
+        abc.price = 200.0
+        xyz.price = 100.0
 
-        # Update only btc
-        await btc.update()
+        # Update only abc
+        await abc.update()
 
         # Reload and verify
         graph.registry.clear()
         await graph.load()
 
-        btc_reloaded = graph.registry[btc.id]
-        eth_reloaded = graph.registry[eth.id]
+        abc_reloaded = graph.registry[abc.id]
+        xyz_reloaded = graph.registry[xyz.id]
 
-        assert btc_reloaded.price == 200.0  # Persisted
-        assert eth_reloaded.price == 50.0  # Not persisted
+        assert abc_reloaded.price == 200.0  # Persisted
+        assert xyz_reloaded.price == 50.0  # Not persisted
 
 
 @pytest.mark.asyncio
@@ -588,65 +588,65 @@ class TestConcurrentModifications:
 
     async def test_last_write_wins(self, graph):
         """Test that last write wins in simple conflict scenario."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
 
         # Simulate two "concurrent" updates (sequential but both from original state)
         # First update
-        asset.price = 200.0
-        await asset.update()
+        item.price = 200.0
+        await item.update()
 
         # Simulate another session loaded original state and modified
         # (We simulate by updating DB directly)
         await graph._conn.execute(
-            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '300.0') WHERE id = %(asset_id)s",
-            asset_id=asset.id
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '300.0') WHERE id = %(item_id)s",
+            item_id=item.id
         )
 
         # Now in-memory object updates again
-        asset.price = 250.0
-        await asset.update()
+        item.price = 250.0
+        await item.update()
 
         # Last write (250.0) should win
         graph.registry.clear()
         await graph.load()
 
-        reloaded = graph.registry[asset.id]
+        reloaded = graph.registry[item.id]
         assert reloaded.price == 250.0
 
     async def test_independent_field_updates(self, graph):
         """Test that updates to different fields work independently."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
             volume: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0, volume=1000.0)
-        await asset.insert()
+        item = Item(source="test", code="ABC", price=100.0, volume=1000.0)
+        await item.insert()
 
         # Update price
-        asset.price = 200.0
-        await asset.update()
+        item.price = 200.0
+        await item.update()
 
         # Simulate external update to volume
         await graph._conn.execute(
-            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{volume}}', '2000.0') WHERE id = %(asset_id)s",
-            asset_id=asset.id
+            f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{volume}}', '2000.0') WHERE id = %(item_id)s",
+            item_id=item.id
         )
 
         # Load to see both changes
         graph.registry.clear()
         await graph.load()
 
-        reloaded = graph.registry[asset.id]
+        reloaded = graph.registry[item.id]
         assert reloaded.price == 200.0
         assert reloaded.volume == 2000.0
 
@@ -657,58 +657,58 @@ class TestConcurrentModificationDetection:
 
     async def test_concurrent_update_last_write_wins(self, graph):
         """Test that concurrent updates follow last-write-wins semantics."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
+        item_id = item.id
 
         # Simulate two concurrent sessions
         # Session 1: Load object
-        session1_asset = asset
+        session1_item = item
 
         # Session 2: Load same object (simulate by reloading)
         graph.registry.clear()
         await graph.load()
-        session2_asset = graph.registry[asset_id]
+        session2_item = graph.registry[item_id]
 
         # Session 1 modifies and saves
-        session1_asset.price = 200.0
-        await session1_asset.update()
+        session1_item.price = 200.0
+        await session1_item.update()
 
         # Session 2 also modifies and saves (unaware of session 1's change)
-        session2_asset.price = 300.0
-        await session2_asset.update()
+        session2_item.price = 300.0
+        await session2_item.update()
 
         # Last write (session 2) should win
         graph.registry.clear()
         await graph.load()
-        final = graph.registry[asset_id]
+        final = graph.registry[item_id]
         assert final.price == 300.0  # Session 2's value
 
     async def test_stale_read_detection_not_implemented(self, graph):
         """Document that stale read detection is not currently implemented."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
+        item_id = item.id
 
         # Hold reference to original object
-        original = asset
+        original = item
 
         # External modification
         await graph._conn.execute(
             f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '500.0') WHERE id = %(id)s",
-            id=asset_id
+            id=item_id
         )
 
         # Original object can still update with stale data (no version check)
@@ -718,38 +718,38 @@ class TestConcurrentModificationDetection:
         # Verify last write won
         graph.registry.clear()
         await graph.load()
-        reloaded = graph.registry[asset_id]
+        reloaded = graph.registry[item_id]
         assert reloaded.price == 150.0
 
     async def test_concurrent_delete_and_update(self, graph):
         """Test updating object that was deleted by another session."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
+        item_id = item.id
 
         # Session 1: Hold reference
-        session1_asset = asset
+        session1_item = item
 
         # Session 2: Delete the object (simulate by direct DB delete)
         await graph._conn.execute(
             f"DELETE FROM {graph._schema}.object WHERE id = %(id)s",
-            id=asset_id
+            id=item_id
         )
 
         # Session 1: Try to update (object doesn't exist anymore)
-        session1_asset.price = 200.0
-        await session1_asset.update()  # Silently succeeds but updates 0 rows
+        session1_item.price = 200.0
+        await session1_item.update()  # Silently succeeds but updates 0 rows
 
         # Verify object is still deleted
         graph.registry.clear()
         await graph.load()
-        assert asset_id not in graph.registry
+        assert item_id not in graph.registry
 
     async def test_concurrent_relationship_changes(self, graph):
         """Test concurrent modifications to relationships."""
@@ -797,26 +797,26 @@ class TestConcurrentModificationDetection:
 
     async def test_interleaved_modifications(self, graph):
         """Test interleaved updates to different fields."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
             volume: float
             name: str
 
-        asset = Asset(source="test", symbol="BTC", price=100.0, volume=1000.0, name="Bitcoin")
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC", price=100.0, volume=1000.0, name="Alpha")
+        await item.insert()
+        item_id = item.id
 
         # Session 1: Load and modify price
-        session1 = asset
+        session1 = item
         session1.price = 200.0
 
         # Session 2: Load and modify volume
         graph.registry.clear()
         await graph.load()
-        session2 = graph.registry[asset_id]
+        session2 = graph.registry[item_id]
         session2.volume = 2000.0
 
         # Session 2 saves first
@@ -828,39 +828,39 @@ class TestConcurrentModificationDetection:
         # Session 1's entire state overwrites, losing session 2's volume change
         graph.registry.clear()
         await graph.load()
-        final = graph.registry[asset_id]
+        final = graph.registry[item_id]
         assert final.price == 200.0  # Session 1's change
         assert final.volume == 1000.0  # Session 2's change was lost!
 
     async def test_registry_state_vs_database_state(self, graph):
         """Test that registry can become out of sync with database."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0)
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC", price=100.0)
+        await item.insert()
+        item_id = item.id
 
         # Keep reference to in-memory object
-        in_memory = asset
+        in_memory = item
 
         # Modify database directly
         await graph._conn.execute(
             f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '500.0') WHERE id = %(id)s",
-            id=asset_id
+            id=item_id
         )
 
         # Registry still has old value
         assert in_memory.price == 100.0
-        assert graph.registry[asset_id].price == 100.0
+        assert graph.registry[item_id].price == 100.0
 
         # Database has new value (can verify by fresh load)
         graph.registry.clear()
         await graph.load()
-        fresh = graph.registry[asset_id]
+        fresh = graph.registry[item_id]
         assert fresh.price == 500.0
 
 
@@ -870,14 +870,14 @@ class TestReloadPatterns:
 
     async def test_selective_reload_not_supported(self, graph):
         """Document that selective object reload is not supported."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
 
-        asset1 = Asset(source="test", symbol="BTC", price=100.0)
-        asset2 = Asset(source="test", symbol="ETH", price=50.0)
+        asset1 = Item(source="test", code="ABC", price=100.0)
+        asset2 = Item(source="test", code="XYZ", price=50.0)
         await asset1.insert()
         await asset2.insert()
 
@@ -898,13 +898,13 @@ class TestReloadPatterns:
 
     async def test_partial_registry_clear(self, graph):
         """Test that you can manually remove objects from registry."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        asset1 = Asset(source="test", symbol="BTC")
-        asset2 = Asset(source="test", symbol="ETH")
+        asset1 = Item(source="test", code="ABC")
+        asset2 = Item(source="test", code="XYZ")
         await asset1.insert()
         await asset2.insert()
 
@@ -919,53 +919,53 @@ class TestReloadPatterns:
         assert id2 in graph.registry
 
         # But this creates inconsistent state - type registry still has it
-        assert id1 in graph.registry_type["asset"]
+        assert id1 in graph.registry_type["item"]
 
     async def test_reload_after_mass_delete(self, graph):
         """Test reloading after many objects are deleted."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
 
-        assets = [Asset(source="test", symbol=f"COIN{i}") for i in range(10)]
-        for a in assets:
+        items = [Item(source="test", code=f"CODE{i}") for i in range(10)]
+        for a in items:
             await a.insert()
 
         # Delete half of them
         for i in range(5):
-            await assets[i].delete()
+            await items[i].delete()
 
         # Reload
         graph.registry.clear()
         await graph.load()
 
         # Only 5 should remain
-        assert len([a for a in graph.registry.values() if isinstance(a, Asset)]) == 5
+        assert len([a for a in graph.registry.values() if isinstance(a, Item)]) == 5
 
     async def test_reload_with_pending_changes(self, graph):
         """Test that reload discards all pending changes."""
-        class Asset(graph.DBObject):
-            category = "financial"
-            type = "asset"
-            symbol: str
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
             price: float
             volume: float
 
-        asset = Asset(source="test", symbol="BTC", price=100.0, volume=1000.0)
-        await asset.insert()
-        asset_id = asset.id
+        item = Item(source="test", code="ABC", price=100.0, volume=1000.0)
+        await item.insert()
+        item_id = item.id
 
         # Make multiple pending changes
-        asset.price = 200.0
-        asset.volume = 2000.0
-        asset.symbol = "BITCOIN"
+        item.price = 200.0
+        item.volume = 2000.0
+        item.code = "ALPHA"
 
         # Reload without saving
         graph.registry.clear()
         await graph.load()
 
-        reloaded = graph.registry[asset_id]
+        reloaded = graph.registry[item_id]
         assert reloaded.price == 100.0
         assert reloaded.volume == 1000.0
-        assert reloaded.symbol == "BTC"
+        assert reloaded.code == "ABC"
