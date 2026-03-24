@@ -292,11 +292,11 @@ class TestGraph:
         # Each should only see their own objects
         assert len(g1.registry) == 1
         assert len(g2.registry) == 1
-        assert asset1 is g1.registry[item1.id]
-        assert asset2 is g2.registry[item2.id]
+        assert item1 is g1.registry[item1.id]
+        assert item2 is g2.registry[item2.id]
 
-        assert asset2 is not g1.registry.get(item2.id)
-        assert asset1 is not g2.registry.get(item1.id)
+        assert item2 is not g1.registry.get(item2.id)
+        assert item1 is not g2.registry.get(item1.id)
 
         # Cleanup
         await db_connection.execute("DROP SCHEMA IF EXISTS schema1 CASCADE")

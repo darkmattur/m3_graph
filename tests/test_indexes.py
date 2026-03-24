@@ -185,7 +185,7 @@ class TestIndexes:
         idx = Item._type_indexes[('code',)]
         assert ('ABC',) in idx
 
-        # Modify symbol
+        # Modify code
         item.code = "ABCUSD"
         item._remove_from_indexes()
         item._update_indexes()

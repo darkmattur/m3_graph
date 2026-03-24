@@ -375,7 +375,7 @@ Load objects with all their related objects in a single query:
 
 ```python
 # Load items and all connected objects
-tokens = await Token.load(expand=True)
+items = await Item.load(expand=True)
 ```
 
 ### Automatic Index Management

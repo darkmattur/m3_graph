@@ -491,11 +491,11 @@ class TestConsistency:
         await abc.insert()
         await xyz.insert()
 
-        # Modify BTC in-memory and persist
+        # Modify ABC in-memory and persist
         abc.price = 200.0
         await abc.update()
 
-        # Modify ETH directly in database
+        # Modify XYZ directly in database
         await graph._conn.execute(
             f"UPDATE {graph._schema}.object SET attr = jsonb_set(attr, '{{price}}', '75.0') WHERE id = %(xyz_id)s",
             xyz_id=xyz.id
