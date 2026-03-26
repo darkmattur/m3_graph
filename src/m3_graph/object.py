@@ -169,8 +169,12 @@ class DBObject(BaseModel):
 
         annotations: dict = getattr(cls, '__annotations__', {})
 
+        # Include the class itself in localns so self-referencing annotations
+        # (e.g. parent: Link[EVMChain] on EVMChain) resolve during class creation.
+        localns = {cls.__name__: cls}
+
         try:
-            type_hints = get_type_hints(cls, include_extras=True)
+            type_hints = get_type_hints(cls, localns=localns, include_extras=True)
         except NameError:
             # get_type_hints failed (likely due to forward refs to local-scope classes).
             # Try evaluating each annotation individually so non-link fields still resolve.
@@ -182,7 +186,7 @@ class DBObject(BaseModel):
                     type_hints[attr_name] = annotation_str
                     continue
                 try:
-                    type_hints[attr_name] = eval(annotation_str, globalns)
+                    type_hints[attr_name] = eval(annotation_str, globalns, localns)
                 except NameError:
                     pass  # Unresolvable forward ref – will be parsed as string below
 
