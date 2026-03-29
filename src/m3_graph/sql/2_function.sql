@@ -56,8 +56,8 @@ FROM graph;
 $$;
 
 -- Update an object only if any field has actually changed; returns true when a write occurred.
--- Uses merge semantics for attr: new keys overwrite, existing keys not in p_attr are preserved
--- (e.g. trigger-managed backlink _ids fields). Comparison only checks the incoming keys.
+-- Uses merge semantics for attr: new keys overwrite, keys ending in _ids that are absent from
+-- p_attr are preserved (trigger-managed backlinks), all other absent keys are removed.
 CREATE OR REPLACE FUNCTION {name}.update_object(
     p_id       bigint,
     p_category text, p_type text, p_subtype text,
@@ -67,19 +67,31 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
     v_count integer;
+    v_merged jsonb;
 BEGIN
+    -- Build merged attr: start with p_attr, then preserve _ids keys from existing attr
+    -- that aren't in p_attr (these are trigger-managed backlink fields)
+    SELECT p_attr || COALESCE(
+        (SELECT jsonb_object_agg(k, v)
+         FROM jsonb_each(attr) AS e(k, v)
+         WHERE k LIKE '%\_ids' ESCAPE '\' AND NOT p_attr ? k),
+        '{}'::jsonb
+    ) INTO v_merged
+    FROM {name}.object
+    WHERE id = p_id;
+
     UPDATE {name}.object
     SET category = p_category,
         type     = p_type,
         subtype  = p_subtype,
-        attr     = attr || p_attr,
+        attr     = v_merged,
         source   = p_source
     WHERE id = p_id
       AND (
             category IS DISTINCT FROM p_category
          OR type     IS DISTINCT FROM p_type
          OR subtype  IS DISTINCT FROM p_subtype
-         OR NOT (attr @> p_attr)
+         OR attr     IS DISTINCT FROM v_merged
          OR source   IS DISTINCT FROM p_source
           );
     GET DIAGNOSTICS v_count = ROW_COUNT;
