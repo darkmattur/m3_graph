@@ -256,6 +256,109 @@ class TestHistoryTracking:
 
         assert len(history) == 1
 
+    async def test_update_preserves_backlink_ids(self, graph):
+        """Test that updating an object doesn't wipe trigger-managed backlink _ids."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+            books: Backlink['Book']
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author, "books"]
+
+        author = Author(source="test", name="Jane")
+        await author.insert()
+
+        book = Book(source="test", title="Book 1", author=author)
+        await book.insert()
+
+        # Verify backlink exists in DB
+        row = await graph._conn.query(
+            f"SELECT attr FROM {graph._schema}.object WHERE id = %(id)s",
+            id=author.id
+        )
+        assert book.id in row[0]['attr']['books_ids']
+
+        # Re-upsert author (simulating a service re-ingesting the same data)
+        author.name = "Jane"
+        await author.update()
+
+        # Backlink must still be there
+        row = await graph._conn.query(
+            f"SELECT attr FROM {graph._schema}.object WHERE id = %(id)s",
+            id=author.id
+        )
+        assert book.id in row[0]['attr']['books_ids']
+
+    async def test_no_spurious_history_on_reupsert_with_backlinks(self, graph):
+        """Test that re-upserting an unchanged object with backlinks creates no extra history."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+            books: Backlink['Book']
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author, "books"]
+
+        author = Author(source="test", name="Jane")
+        await author.insert()
+
+        book = Book(source="test", title="Book 1", author=author)
+        await book.insert()
+
+        # Re-upsert author with identical data multiple times
+        for _ in range(5):
+            await author.update()
+
+        # Should have exactly 1 history entry (the original insert)
+        history = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.history WHERE id = %(id)s",
+            id=author.id
+        )
+        assert len(history) == 1
+
+    async def test_real_change_still_tracked_with_backlinks(self, graph):
+        """Test that genuine changes are still tracked when backlinks exist."""
+        class Author(graph.DBObject):
+            category = "test"
+            type = "author"
+            name: str
+            books: Backlink['Book']
+
+        class Book(graph.DBObject):
+            category = "test"
+            type = "book"
+            title: str
+            author: Link[Author, "books"]
+
+        author = Author(source="test", name="Jane")
+        await author.insert()
+
+        book = Book(source="test", title="Book 1", author=author)
+        await book.insert()
+
+        # Genuine update
+        author.name = "Jane Doe"
+        await author.update()
+
+        history = await graph._conn.query(
+            f"SELECT * FROM {graph._schema}.history WHERE id = %(id)s ORDER BY validity",
+            id=author.id
+        )
+        assert len(history) == 2
+        assert history[0]['attr']['name'] == "Jane"
+        assert history[1]['attr']['name'] == "Jane Doe"
+        # Backlink preserved in latest history
+        assert book.id in history[1]['attr']['books_ids']
+
     async def test_history_preserves_all_attributes(self, graph):
         """Test that history preserves all object attributes."""
         class ComplexObj(graph.DBObject):
