@@ -74,7 +74,7 @@ BEGIN
     SELECT p_attr || COALESCE(
         (SELECT jsonb_object_agg(k, v)
          FROM jsonb_each(attr) AS e(k, v)
-         WHERE k LIKE '%\_ids' ESCAPE '\' AND NOT p_attr ? k),
+         WHERE k LIKE '%%\_ids' ESCAPE '\' AND NOT p_attr ? k),
         '{}'::jsonb
     ) INTO v_merged
     FROM {name}.object
