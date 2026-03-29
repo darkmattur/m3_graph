@@ -154,9 +154,9 @@ class Graph:
 
         # Initialize objects one by one using the subtype registry
         for row in rows:
-            # Skip if already loaded
+            # If already loaded, remove old index entries before replacing
             if row['id'] in self.registry:
-                continue
+                self.registry[row['id']]._remove_from_indexes()
 
             subtype = row['subtype']
 
