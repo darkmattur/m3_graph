@@ -55,7 +55,9 @@ SELECT id, category, type, subtype, attr, source
 FROM graph;
 $$;
 
--- Update an object only if any field has actually changed; returns true when a write occurred
+-- Update an object only if any field has actually changed; returns true when a write occurred.
+-- Uses merge semantics for attr: new keys overwrite, existing keys not in p_attr are preserved
+-- (e.g. trigger-managed backlink _ids fields). Comparison only checks the incoming keys.
 CREATE OR REPLACE FUNCTION {name}.update_object(
     p_id       bigint,
     p_category text, p_type text, p_subtype text,
@@ -70,14 +72,14 @@ BEGIN
     SET category = p_category,
         type     = p_type,
         subtype  = p_subtype,
-        attr     = p_attr,
+        attr     = attr || p_attr,
         source   = p_source
     WHERE id = p_id
       AND (
             category IS DISTINCT FROM p_category
          OR type     IS DISTINCT FROM p_type
          OR subtype  IS DISTINCT FROM p_subtype
-         OR attr     IS DISTINCT FROM p_attr
+         OR NOT (attr @> p_attr)
          OR source   IS DISTINCT FROM p_source
           );
     GET DIAGNOSTICS v_count = ROW_COUNT;
