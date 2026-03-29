@@ -59,11 +59,15 @@ class Graph:
             host=host, port=port, dbname=dbname,
             user=user, password=password, **kwargs
         )
+
+        if create:
+            await cls._create_schema(conn, schema)
+
         graph = cls(conn, schema)
 
         if create:
-            await graph.create(conn, schema)
-        
+            await graph.maintain()
+
         return graph
 
     
@@ -98,11 +102,16 @@ class Graph:
     _sql_folder_path = Path(os.path.dirname(__file__)) / 'sql'
 
     @classmethod
-    async def create(cls, conn: DBConn, name: str = 'catalog'):
+    async def _create_schema(cls, conn: DBConn, name: str = 'catalog'):
+        """Create the database schema (tables, triggers, functions) without instantiating a Graph."""
         for file in sorted(cls._sql_folder_path.glob('*.sql')):
             sql_def = file.read_text().replace('{name}', name)
             await conn.execute(sql_def)
-        
+
+    @classmethod
+    async def create(cls, conn: DBConn, name: str = 'catalog'):
+        await cls._create_schema(conn, name)
+
         graph = cls(conn, name)
         await graph.maintain()
 
@@ -145,6 +154,10 @@ class Graph:
 
         # Initialize objects one by one using the subtype registry
         for row in rows:
+            # Skip if already loaded
+            if row['id'] in self.registry:
+                continue
+
             subtype = row['subtype']
 
             # Get the appropriate class for this subtype
@@ -162,7 +175,7 @@ class Graph:
                 'source': row['source'],
                 **row['attr']
             }
-            
+
             # Initialize the object
             cls(**obj_data)
     
@@ -213,6 +226,8 @@ class Graph:
             raise ValueError("Cannot delete object without id")
 
         await self._conn.execute(f"DELETE FROM {self._schema}.object WHERE id = %(id)s", id=obj.id)
+
+        obj._remove_from_indexes()
 
         self.registry.pop(obj.id, None)
         if hasattr(obj, 'type') and obj.type:

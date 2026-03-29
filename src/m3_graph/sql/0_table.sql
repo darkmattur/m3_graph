@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS {name}.object (
   type     TEXT NOT NULL,
   subtype  TEXT NOT NULL,
   attr     JSONB NOT NULL DEFAULT '{}'::JSONB,
-  source   TEXT NOT NULL
+  source   TEXT DEFAULT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_object_category ON {name}.object (category);

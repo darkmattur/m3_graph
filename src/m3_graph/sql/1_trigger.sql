@@ -296,7 +296,7 @@ BEGIN
   END LOOP;
 
   UPDATE {name}.history
-  SET validity = tstzrange(lower(validity), (date_trunc('day', now()) + interval '1 day' + interval '1 day')::timestamptz, '(]')
+  SET validity = tstzrange(lower(validity), now(), '(]')
   WHERE id = OLD.id
     AND upper(validity) = 'infinity';
 

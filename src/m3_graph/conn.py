@@ -52,9 +52,9 @@ class InfDateLoader(DateLoader):
 class InfTimestamptzLoader(TimestamptzLoader):
     def load(self, data):
         if data == b"infinity":
-            return "infinity"
+            return dt.datetime.max
         elif data == b"-infinity":
-            return "-infinity"
+            return dt.datetime.min
         else:
             return super().load(data)
 
@@ -83,7 +83,7 @@ class DBConn:
         return output
 
 
-async def connect(*args, host, port=None, dbname, user=None, password=None, **kwargs):
+async def connect(*, host, port=None, dbname, user=None, password=None, **kwargs):
     conn_string = ' '.join(
         f'{key}={value}' for key, value in [
             ('host', host),

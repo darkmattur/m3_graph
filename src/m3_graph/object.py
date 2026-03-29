@@ -135,7 +135,7 @@ class DBObject(BaseModel):
                     self._register_unsaved_backlink(related_obj, backlink_name, self)
 
         # Register instance if id is set
-        if self.id:
+        if self.id is not None:
             self.graph.registry[self.id] = self
             if hasattr(self, 'type') and self.type:
                 self.graph.registry_type[self.type][self.id] = self
@@ -828,20 +828,22 @@ class DBObject(BaseModel):
             return
 
         # Collect parent_types from base classes via MRO
-        # NOTE: Despite the name, parent_types stores SUBTYPE values, not type values
+        # Includes both type and subtype values of ancestors so that
+        # fetch_object_by_type (which queries by type) can find descendants
         parent_types = []
         for base in cls.__mro__[1:]:
             if hasattr(base, 'subtype') and base.subtype and base.subtype != cls.subtype:
                 parent_types.append(base.subtype)
+            if hasattr(base, 'type') and base.type and base.type != cls.type and base.type not in parent_types:
+                parent_types.append(base.type)
 
         # Collect descendant_types by checking ALL registered types in the graph
-        # NOTE: Despite the name, descendant_types stores SUBTYPE values, not type values
         # A subtype S is a descendant of cls if cls.subtype appears in S's parent chain (MRO)
         descendant_types = [cls.subtype]  # Always include self
         for subtype_name, subtype_cls in cls.graph.__class__.subtypes.items():
             if subtype_name == cls.subtype:
                 continue  # Skip self (already included)
-            # Check if cls.subtype is in this subtype's ancestry
+            # Check if cls.subtype or cls.type is in this subtype's ancestry
             for base in subtype_cls.__mro__[1:]:
                 if hasattr(base, 'subtype') and base.subtype == cls.subtype:
                     descendant_types.append(subtype_name)
