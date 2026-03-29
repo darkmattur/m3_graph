@@ -11,12 +11,12 @@ from psycopg.types.datetime import DateLoader, DateDumper, TimestamptzLoader
 
 class SimpleJsonDumper(JsonDumper):
     def dump(self, obj):
-        return simplejson.dumps(obj, use_decimal=True).encode('utf-8')
+        return simplejson.dumps(obj, use_decimal=True, default=str).encode('utf-8')
 
 
 class SimpleJsonbDumper(JsonbDumper):
     def dump(self, obj):
-        return simplejson.dumps(obj.obj, use_decimal=True).encode('utf-8')
+        return simplejson.dumps(obj.obj, use_decimal=True, default=str).encode('utf-8')
 
 
 class SimpleJsonLoader(JsonLoader):
