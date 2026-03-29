@@ -891,15 +891,23 @@ class DBObject(BaseModel):
             if attribute_value is None:
                 continue
 
+            # Always scope to type as well when using category or subtype,
+            # to avoid collisions between types sharing the same category.
+            type_value = getattr(cls, 'type', None)
+
             for constraint in constraints:
                 cols = (constraint,) if isinstance(constraint, str) else constraint
-                idx_name = f"idx_unique_{attribute_value}_{'_'.join(cols)}"
+                idx_name = f"idx_unique_{attribute_value}_{type_value}_{'_'.join(cols)}"
                 expr = f"((attr->>'{cols[0]}'))" if len(cols) == 1 else ", ".join(f"(attr->>'{c}')" for c in cols)
+
+                where = f"{attribute} = '{attribute_value}'"
+                if attribute != 'type' and type_value:
+                    where += f" AND type = '{type_value}'"
 
                 await cls.graph._conn.execute(f"""
                     CREATE UNIQUE INDEX IF NOT EXISTS {idx_name}
                     ON {cls.graph._schema}.object ({expr})
-                    WHERE {attribute} = '{attribute_value}'
+                    WHERE {where}
                 """)
 
     @classmethod
