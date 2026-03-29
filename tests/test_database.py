@@ -270,6 +270,17 @@ class TestHistoryTracking:
             title: str
             author: Link[Author, "books"]
 
+        # Register relationship metadata so triggers populate backlinks
+        await graph._conn.execute(
+            f"""
+            INSERT INTO {graph._schema}.meta (category, type, subtype, forward, back)
+            VALUES ('test', 'book', 'book', %(forward)s, %(back)s)
+            ON CONFLICT (category, type, subtype) DO UPDATE SET forward = EXCLUDED.forward, back = EXCLUDED.back
+            """,
+            forward={"author_id": "books_ids"},
+            back=[]
+        )
+
         author = Author(source="test", name="Jane")
         await author.insert()
 
@@ -308,6 +319,16 @@ class TestHistoryTracking:
             title: str
             author: Link[Author, "books"]
 
+        await graph._conn.execute(
+            f"""
+            INSERT INTO {graph._schema}.meta (category, type, subtype, forward, back)
+            VALUES ('test', 'book', 'book', %(forward)s, %(back)s)
+            ON CONFLICT (category, type, subtype) DO UPDATE SET forward = EXCLUDED.forward, back = EXCLUDED.back
+            """,
+            forward={"author_id": "books_ids"},
+            back=[]
+        )
+
         author = Author(source="test", name="Jane")
         await author.insert()
 
@@ -338,6 +359,16 @@ class TestHistoryTracking:
             type = "book"
             title: str
             author: Link[Author, "books"]
+
+        await graph._conn.execute(
+            f"""
+            INSERT INTO {graph._schema}.meta (category, type, subtype, forward, back)
+            VALUES ('test', 'book', 'book', %(forward)s, %(back)s)
+            ON CONFLICT (category, type, subtype) DO UPDATE SET forward = EXCLUDED.forward, back = EXCLUDED.back
+            """,
+            forward={"author_id": "books_ids"},
+            back=[]
+        )
 
         author = Author(source="test", name="Jane")
         await author.insert()
