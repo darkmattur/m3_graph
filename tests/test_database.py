@@ -8,7 +8,7 @@ Tests cover:
 - Type validation and constraints
 - Database integrity errors
 """
-import datetime
+import datetime as dt
 import pytest
 from decimal import Decimal
 from pydantic import ValidationError
@@ -205,11 +205,11 @@ class TestHistoryTracking:
 
         # First entry should have old value with closed validity
         assert history[0]['attr']['name'] == "Alpha"
-        assert history[0]['validity'].upper != datetime.max
+        assert history[0]['validity'].upper != dt.datetime.max
 
         # Second entry should have new value with open validity
         assert history[1]['attr']['name'] == "Alpha Core"
-        assert history[1]['validity'].upper == datetime.max
+        assert history[1]['validity'].upper == dt.datetime.max
 
     async def test_history_on_delete(self, graph):
         """Test that history is updated on delete."""
@@ -233,7 +233,7 @@ class TestHistoryTracking:
         )
 
         assert len(history) == 1
-        assert history[0]['validity'].upper != datetime.max
+        assert history[0]['validity'].upper != dt.datetime.max
 
     async def test_history_no_change_no_entry(self, graph):
         """Test that history doesn't create new entry if nothing changed."""
