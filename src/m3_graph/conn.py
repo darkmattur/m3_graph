@@ -82,6 +82,10 @@ class DBConn:
         await results.close()
         return output
 
+    def transaction(self):
+        """Context manager for explicit database transactions."""
+        return self._conn.transaction()
+
 
 async def connect(*, host, port=None, dbname, user=None, password=None, **kwargs):
     conn_string = ' '.join(

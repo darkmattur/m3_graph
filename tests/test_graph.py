@@ -397,3 +397,71 @@ class TestGraph:
         assert 'object' in table_names
         assert 'history' in table_names
         assert 'meta' in table_names
+
+    async def test_transaction_commit(self, graph, db_connection, test_schema):
+        """Test that writes inside a transaction are committed together."""
+
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+            name: str
+
+        async with graph.transaction():
+            a = Item(source="test", code="A", name="Alpha")
+            await a.insert()
+            b = Item(source="test", code="B", name="Beta")
+            await b.insert()
+
+        # Both should be persisted
+        rows = await db_connection.query(
+            f"SELECT (attr->>'code') as code FROM {test_schema}.object WHERE type = 'item' ORDER BY id"
+        )
+        assert [r['code'] for r in rows] == ['A', 'B']
+
+    async def test_transaction_rollback(self, graph, db_connection, test_schema):
+        """Test that writes inside a failed transaction are rolled back."""
+
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+
+        # Insert one item outside the transaction
+        pre = Item(source="test", code="PRE")
+        await pre.insert()
+
+        try:
+            async with graph.transaction():
+                item = Item(source="test", code="SHOULD_ROLLBACK")
+                await item.insert()
+                raise RuntimeError("force rollback")
+        except RuntimeError:
+            pass
+
+        # Only the pre-transaction item should exist in DB
+        rows = await db_connection.query(
+            f"SELECT (attr->>'code') as code FROM {test_schema}.object WHERE type = 'item'"
+        )
+        assert [r['code'] for r in rows] == ['PRE']
+
+    async def test_dbconn_transaction(self, graph, db_connection, test_schema):
+        """Test that DBConn.transaction() works the same as Graph.transaction()."""
+
+        class Item(graph.DBObject):
+            category = "catalog"
+            type = "item"
+            code: str
+
+        try:
+            async with db_connection.transaction():
+                item = Item(source="test", code="SHOULD_ROLLBACK")
+                await item.insert()
+                raise RuntimeError("force rollback")
+        except RuntimeError:
+            pass
+
+        rows = await db_connection.query(
+            f"SELECT count(*) as n FROM {test_schema}.object WHERE type = 'item'"
+        )
+        assert rows[0]['n'] == 0

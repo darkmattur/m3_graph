@@ -152,8 +152,10 @@ class DBObject(BaseModel):
         ):
             indexed_attrs.update(cols)
 
+        is_registered = hasattr(self, 'id') and self.id is not None
+
         # If this is an indexed attribute and the object is already initialized
-        if name in indexed_attrs and hasattr(self, 'id') and self.id is not None:
+        if name in indexed_attrs and is_registered:
             # Remove old index entries before changing the value
             self._remove_from_indexes()
             # Change the value
@@ -161,8 +163,20 @@ class DBObject(BaseModel):
             # Add new index entries with the new value
             self._update_indexes()
         else:
-            # Normal attribute setting
+            # Refresh computed property indexes (e.g. m3_ticker derived from m3_symbol)
+            if is_registered and self._computed_indexes:
+                for prop_name, idx in self._computed_indexes.items():
+                    old_val = getattr(self, prop_name, None)
+                    if old_val is not None:
+                        idx.pop(old_val, None)
+
             super().__setattr__(name, value)
+
+            if is_registered and self._computed_indexes:
+                for prop_name, idx in self._computed_indexes.items():
+                    new_val = getattr(self, prop_name, None)
+                    if new_val is not None:
+                        idx[new_val] = self
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)

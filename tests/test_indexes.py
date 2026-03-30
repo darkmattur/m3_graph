@@ -425,7 +425,7 @@ class TestIndexEdgeCases:
         assert (None,) in idx
 
     async def test_computed_property_index_with_none(self, graph):
-        """Test computed property index when property returns None."""
+        """Test computed property index when property transitions from None."""
         class Person(graph.DBObject):
             category = "test"
             type = "person"
@@ -446,13 +446,12 @@ class TestIndexEdgeCases:
         idx = Person._computed_indexes['full_name']
         assert None not in idx
 
-        # Update to have both names
+        # Update to have both names — computed index should auto-refresh
         person.first_name = "John"
         person.last_name = "Doe"
-        person._remove_from_indexes()
-        person._update_indexes()
 
         assert 'John Doe' in idx
+        assert idx['John Doe'] is person
 
     async def test_index_with_type_coercion(self, graph):
         """Test index behavior with type coercion (int, float, bool)."""
@@ -556,7 +555,7 @@ class TestIndexEdgeCases:
         # If type were changed, indexes would become inconsistent
 
     async def test_computed_index_with_changing_value(self, graph):
-        """Test computed property index when underlying values change."""
+        """Test computed property index auto-refreshes when underlying values change."""
         class Person(graph.DBObject):
             category = "test"
             type = "person"
@@ -574,17 +573,12 @@ class TestIndexEdgeCases:
         idx = Person._computed_indexes['full_name']
         assert 'John Doe' in idx
 
-        # Change underlying field
+        # Change underlying field — computed index should auto-refresh
         person.first_name = "Jane"
-        person._remove_from_indexes()
-        person._update_indexes()
 
-        # New index entry should be created
         assert 'Jane Doe' in idx
-
-        # NOTE: Old index entry may still exist (implementation doesn't clean up old computed keys)
-        # This documents current behavior - computed index cleanup is not perfect
-        # The same object instance appears under both keys
+        assert 'John Doe' not in idx
+        assert idx['Jane Doe'] is person
 
     async def test_index_with_empty_string(self, graph):
         """Test index behavior with empty strings."""
@@ -663,3 +657,72 @@ class TestIndexEdgeCases:
 
         idx = Record._type_indexes[('field1', 'field2', 'field3')]
         assert ('A', None, 'C') in idx
+
+    async def test_computed_index_multiple_mutations(self, graph):
+        """Test computed index stays consistent across multiple attribute changes."""
+        class Asset(graph.DBObject):
+            category = "test"
+            type = "asset"
+            code: str
+            label: str | None = None
+            computed_unique_attr = ['ticker']
+
+            @property
+            def ticker(self) -> str | None:
+                return f"{self.code}.{self.label}" if self.label else None
+
+        asset = Asset(source="test", code="TKN", label=None)
+        await asset.insert()
+
+        idx = Asset._computed_indexes['ticker']
+
+        # Initially None — not in index
+        assert 'TKN.None' not in idx
+
+        # Set label — ticker becomes "TKN.BTC"
+        asset.label = "BTC"
+        assert 'TKN.BTC' in idx
+        assert idx['TKN.BTC'] is asset
+
+        # Change label — old ticker removed, new one added
+        asset.label = "ETH"
+        assert 'TKN.BTC' not in idx
+        assert 'TKN.ETH' in idx
+        assert idx['TKN.ETH'] is asset
+
+        # Clear label — ticker goes back to None, removed from index
+        asset.label = None
+        assert 'TKN.ETH' not in idx
+
+    async def test_computed_index_findable_after_mutation(self, graph):
+        """Test that find() works with computed index after attribute mutation."""
+        class Asset(graph.DBObject):
+            category = "test"
+            type = "asset"
+            name: str
+            label: str | None = None
+            type_unique_attr = ['name']
+            computed_unique_attr = ['ticker']
+
+            @property
+            def ticker(self) -> str | None:
+                return f"X.{self.label}" if self.label else None
+
+        asset = Asset(source="test", name="Bitcoin", label=None)
+        await asset.insert()
+
+        # Not findable by ticker yet (None)
+        assert Asset.find(ticker="X.BTC") is None
+
+        # Set label
+        asset.label = "BTC"
+
+        # Now findable by the new computed value
+        assert Asset.find(ticker="X.BTC") is asset
+
+        # Change label
+        asset.label = "XBT"
+
+        # Old ticker gone, new one works
+        assert Asset.find(ticker="X.BTC") is None
+        assert Asset.find(ticker="X.XBT") is asset

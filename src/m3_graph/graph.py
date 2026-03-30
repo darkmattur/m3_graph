@@ -125,6 +125,10 @@ class Graph:
         classes = set(graph_cls.types.values()) | set(graph_cls.subtypes.values())
         await asyncio.gather(*(db_cls.maintain() for db_cls in classes))
     
+    def transaction(self):
+        """Context manager for explicit database transactions."""
+        return self._conn.transaction()
+
     ####################################################################################
     # Internal Methods
     ####################################################################################
