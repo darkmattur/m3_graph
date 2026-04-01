@@ -23,7 +23,23 @@ steps:
         if not tag:
           raise SystemExit("CI_COMMIT_TAG is not set")
 
-        ver = tag[1:] if tag.startswith("v") else tag
+        ver = tag.lstrip("v")
+        branch = os.getenv("CI_COMMIT_BRANCH", "")
+
+        # Map environment suffixes to PEP 440 pre-release
+        expected = {"test": "-test", "integ": "-integ", "prod": ""}
+        if ver.endswith("-test"):
+            if branch != "test":
+                raise SystemExit(f"-test tag on branch '{branch}', expected 'test'")
+            ver = ver.removesuffix("-test") + ".dev0"
+        elif ver.endswith("-integ"):
+            if branch != "integ":
+                raise SystemExit(f"-integ tag on branch '{branch}', expected 'integ'")
+            ver = ver.removesuffix("-integ") + "rc0"
+        else:
+            if branch not in ("prod", ""):
+                raise SystemExit(f"prod tag on branch '{branch}', expected 'prod'")
+
         Path("VERSION").write_text(ver + "\n", encoding="utf-8")
         print("Version set to", ver)
         PY
