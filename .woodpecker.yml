@@ -13,11 +13,21 @@ steps:
 
   set-version:
     image: python:3.13-slim
+    environment:
+      GITEA_URL:
+        from_secret: GITEA_URL
+      GITEA_SVC_USER:
+        from_secret: GITEA_SVC_USER
+      GITEA_SVC_PASSWORD:
+        from_secret: GITEA_SVC_PASSWORD
     commands:
       - |
         python - <<'PY'
-        import os
+        import os, json, sys
         from pathlib import Path
+        from urllib.request import Request, urlopen
+        from urllib.error import HTTPError
+        from base64 import b64encode
 
         tag = os.getenv("CI_COMMIT_TAG", "")
         if not tag:
@@ -25,14 +35,50 @@ steps:
 
         ver = tag.lstrip("v")
 
-        # Map tag suffix to PEP 440 pre-release
+        # Map tag suffix → PEP 440 pre-release + expected branch
         if ver.endswith("-test"):
+            expected_branch = "test"
             ver = ver.removesuffix("-test") + ".dev0"
         elif ver.endswith("-integ"):
+            expected_branch = "integ"
             ver = ver.removesuffix("-integ") + "rc0"
+        else:
+            expected_branch = "main"
+
+        # Verify: tagged commit must be the tip of the expected branch.
+        # Woodpecker does not populate CI_COMMIT_BRANCH for tag events,
+        # so we verify against the Gitea API directly.
+        gitea_url = os.environ["GITEA_URL"]
+        user     = os.environ["GITEA_SVC_USER"]
+        password = os.environ["GITEA_SVC_PASSWORD"]
+        owner    = os.environ["CI_REPO_OWNER"]
+        repo     = os.environ["CI_REPO_NAME"]
+        sha      = os.environ["CI_COMMIT_SHA"]
+
+        auth = b64encode(f"{user}:{password}".encode()).decode()
+        url  = f"{gitea_url}/api/v1/repos/{owner}/{repo}/branches/{expected_branch}"
+        req  = Request(url, headers={"Authorization": f"Basic {auth}"})
+
+        try:
+            branch_info = json.loads(urlopen(req).read())
+            branch_sha  = branch_info["commit"]["id"]
+        except HTTPError as e:
+            if e.code == 404:
+                raise SystemExit(
+                    f"Branch '{expected_branch}' does not exist — "
+                    f"cannot publish tag '{tag}'"
+                )
+            raise
+
+        if sha != branch_sha:
+            raise SystemExit(
+                f"Tag '{tag}' ({sha[:12]}) is not the tip of "
+                f"'{expected_branch}' ({branch_sha[:12]}). "
+                f"Tag the HEAD of '{expected_branch}' to publish."
+            )
 
         Path("VERSION").write_text(ver + "\n", encoding="utf-8")
-        print("Version set to", ver)
+        print(f"Version set to {ver} (verified on {expected_branch})")
         PY
     when:
       event: tag
