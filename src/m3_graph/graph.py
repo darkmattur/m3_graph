@@ -208,6 +208,123 @@ class Graph:
 
         return obj.id
 
+    async def _bulk_insert(self, objects: list[DBObject]):
+        """Insert multiple DBObjects in a single multi-row INSERT statement.
+
+        This triggers the statement-level trigger once for the entire batch,
+        enabling set-based backlink maintenance instead of per-row.
+        """
+        if not objects:
+            return
+
+        for obj in objects:
+            if obj.id is not None:
+                raise ValueError("Cannot insert object with existing id")
+
+        # Build rows for execute_many-style insert, but we need RETURNING
+        # so we use a single INSERT with unnest arrays
+        categories = [obj.category for obj in objects]
+        types = [obj.type for obj in objects]
+        subtypes = [obj.subtype for obj in objects]
+        attrs = [Jsonb(obj._get_attr()) for obj in objects]
+        sources = [obj.source for obj in objects]
+
+        rows = await self._conn.query(
+            f"""
+            INSERT INTO {self._schema}.object (category, type, subtype, attr, source)
+            SELECT unnest(%(categories)s::text[]),
+                   unnest(%(types)s::text[]),
+                   unnest(%(subtypes)s::text[]),
+                   unnest(%(attrs)s::jsonb[]),
+                   unnest(%(sources)s::text[])
+            RETURNING id
+            """,
+            categories=categories,
+            types=types,
+            subtypes=subtypes,
+            attrs=attrs,
+            sources=sources,
+        )
+
+        # Assign IDs and register
+        for obj, row in zip(objects, rows):
+            obj.id = row['id']
+            self.registry[obj.id] = obj
+            if hasattr(obj, 'type') and obj.type:
+                self.registry_type[obj.type][obj.id] = obj
+            obj._update_indexes()
+            obj._clear_all_unsaved_backlinks()
+            obj._convert_backlink_refs_to_ids()
+
+    async def _bulk_upsert(self, objects: list[DBObject]):
+        """Upsert multiple objects, resolving dependency order automatically.
+
+        Topologically sorts objects by their unsaved references so parents
+        are inserted before children. Each dependency layer is bulk-inserted
+        in a single statement. Objects that already have an id are updated
+        individually.
+        """
+        if not objects:
+            return
+
+        to_update = [o for o in objects if o.id is not None]
+        to_insert = [o for o in objects if o.id is None]
+
+        # Topological sort: partition into layers by dependency depth
+        remaining = set(id(o) for o in to_insert)
+        obj_map = {id(o): o for o in to_insert}
+        layers: list[list[DBObject]] = []
+
+        while remaining:
+            # A layer is all objects whose unsaved refs are NOT in remaining
+            layer = []
+            for oid in list(remaining):
+                obj = obj_map[oid]
+                unsaved = getattr(obj, '_unsaved_refs', {})
+                deps_in_remaining = any(
+                    id(ref) in remaining for ref in unsaved.values()
+                )
+                if not deps_in_remaining:
+                    layer.append(obj)
+
+            if not layer:
+                names = [repr(obj_map[oid]) for oid in list(remaining)[:3]]
+                raise ValueError(
+                    f"Circular unsaved references among {len(remaining)} objects "
+                    f"(e.g. {', '.join(names)})"
+                )
+
+            for obj in layer:
+                remaining.discard(id(obj))
+            layers.append(layer)
+
+        # Insert layer by layer
+        for layer in layers:
+            # Resolve FK ids from now-saved refs
+            for obj in layer:
+                unsaved = getattr(obj, '_unsaved_refs', None)
+                if not unsaved:
+                    continue
+                for rel_name, ref in list(unsaved.items()):
+                    if ref.id is not None:
+                        setattr(obj, f"{rel_name}_id", ref.id)
+                        obj._clear_unsaved_backlinks(rel_name)
+                        del unsaved[rel_name]
+
+            await self._bulk_insert(layer)
+
+        # Updates (no batching — update_object checks per row)
+        for obj in to_update:
+            # Resolve any unsaved refs
+            unsaved = getattr(obj, '_unsaved_refs', None)
+            if unsaved:
+                for rel_name, ref in list(unsaved.items()):
+                    if ref.id is not None:
+                        setattr(obj, f"{rel_name}_id", ref.id)
+                        obj._clear_unsaved_backlinks(rel_name)
+                        del unsaved[rel_name]
+            await self._update(obj)
+
     async def _update(self, obj: DBObject) -> bool:
         """Update existing DBObject in database; returns True only when data actually changed."""
         if obj.id is None:

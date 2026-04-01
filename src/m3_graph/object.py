@@ -764,6 +764,40 @@ class DBObject(BaseModel):
 
             setattr(self, ids_field, converted)
 
+    @classmethod
+    async def bulk_insert(cls, objects: list['DBObject']):
+        """Insert multiple objects in a single statement.
+
+        Triggers fire once for the whole batch, enabling set-based
+        backlink maintenance instead of per-row.
+        """
+        if not objects:
+            return
+
+        for obj in objects:
+            if obj.id is not None:
+                raise ValueError("Cannot bulk_insert object with existing id")
+            if hasattr(obj, '_unsaved_refs') and obj._unsaved_refs:
+                unsaved_names = ', '.join(obj._unsaved_refs.keys())
+                raise ValueError(
+                    f"Cannot insert object with unsaved references: {unsaved_names}. "
+                    f"Save them first."
+                )
+
+        await cls.graph._bulk_insert(objects)
+
+    @classmethod
+    async def bulk_upsert(cls, objects: list['DBObject']):
+        """Insert or update multiple objects, resolving dependency order automatically.
+
+        Objects with unsaved references are topologically sorted so parents
+        are inserted before children. Each layer is bulk-inserted in one
+        statement. Objects that already have an id are updated.
+        """
+        if not objects:
+            return
+        await cls.graph._bulk_upsert(objects)
+
     async def insert(self) -> bool:
         """Insert this object into the database; always returns True."""
         if self.id is not None:
