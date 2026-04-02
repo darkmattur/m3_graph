@@ -929,6 +929,14 @@ class DBObject(BaseModel):
             descendant_types=descendant_types,
         )
 
+    _SAFE_IDENT = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+    @classmethod
+    def _validate_ident(cls, value: str, label: str = 'identifier') -> str:
+        if not cls._SAFE_IDENT.match(value):
+            raise ValueError(f'Unsafe SQL {label}: {value!r}')
+        return value
+
     @classmethod
     async def _create_unique_index(cls):
         """Create database unique indexes for this type."""
@@ -945,8 +953,15 @@ class DBObject(BaseModel):
             # to avoid collisions between types sharing the same category.
             type_value = getattr(cls, 'type', None)
 
+            cls._validate_ident(attribute_value, 'attribute value')
+            if type_value:
+                cls._validate_ident(type_value, 'type value')
+
             for constraint in constraints:
                 cols = (constraint,) if isinstance(constraint, str) else constraint
+                for c in cols:
+                    cls._validate_ident(c, 'column name')
+
                 idx_name = f"idx_unique_{attribute_value}_{type_value}_{'_'.join(cols)}"
                 expr = f"((attr->>'{cols[0]}'))" if len(cols) == 1 else ", ".join(f"(attr->>'{c}')" for c in cols)
 
