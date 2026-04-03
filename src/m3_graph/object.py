@@ -559,8 +559,8 @@ class DBObject(BaseModel):
         if not hasattr(cls, 'type') or cls.type is None:
             return []
 
-        # Get objects from the type-specific registry
-        return list(cls.graph.registry_type.get(cls.type, {}).values())
+        objects = cls.graph.registry_type.get(cls.type, {}).values()
+        return [obj for obj in objects if isinstance(obj, cls)]
 
     @classmethod
     def find(cls, **kwargs):
