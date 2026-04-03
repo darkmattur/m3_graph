@@ -383,15 +383,20 @@ class DBObject(BaseModel):
         cls._subtype_indexes = {}
         cls._computed_indexes = {}
 
-        # Collect constraints from inheritance chain
-        cls._all_category_constraints = list({c for base in reversed(cls.__mro__)
-            if hasattr(base, 'category_unique_attr') for c in base.category_unique_attr})
-        cls._all_type_constraints = list({c for base in reversed(cls.__mro__)
-            if hasattr(base, 'type_unique_attr') for c in base.type_unique_attr})
-        cls._all_subtype_constraints = list({c for base in reversed(cls.__mro__)
-            if hasattr(base, 'subtype_unique_attr') for c in base.subtype_unique_attr})
-        cls._all_computed_constraints = list({c for base in reversed(cls.__mro__)
-            if hasattr(base, 'computed_unique_attr') for c in base.computed_unique_attr})
+        # Collect constraints from inheritance chain.
+        # If a class explicitly defines a constraint attr, use it directly
+        # (even if empty) to respect overrides like Token.type_unique_attr = [].
+        # Otherwise, accumulate from the MRO.
+        def _collect_constraints(attr_name):
+            if attr_name in cls.__dict__:
+                return list(getattr(cls, attr_name))
+            return list({c for base in reversed(cls.__mro__)
+                if hasattr(base, attr_name) for c in getattr(base, attr_name)})
+
+        cls._all_category_constraints = _collect_constraints('category_unique_attr')
+        cls._all_type_constraints = _collect_constraints('type_unique_attr')
+        cls._all_subtype_constraints = _collect_constraints('subtype_unique_attr')
+        cls._all_computed_constraints = _collect_constraints('computed_unique_attr')
 
         # Initialize index dictionaries
         for attribute, constraints, indexes_attr in [
