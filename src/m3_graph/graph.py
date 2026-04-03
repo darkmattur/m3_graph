@@ -1,4 +1,5 @@
-import os, asyncio
+import os, asyncio, datetime as dt
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from collections import defaultdict
@@ -88,6 +89,7 @@ class Graph:
         # Object registries
         self.registry = dict()
         self.registry_type = defaultdict(dict)
+        self.registry_subtype = defaultdict(dict)
 
         # Set graph instance on DBObject base class so all subclasses can access it
         self.DBObject.graph = self
@@ -125,9 +127,42 @@ class Graph:
         classes = set(graph_cls.types.values()) | set(graph_cls.subtypes.values())
         await asyncio.gather(*(db_cls.maintain() for db_cls in classes))
     
-    def transaction(self):
-        """Context manager for explicit database transactions."""
-        return self._conn.transaction()
+    def transaction(self, *, input_date: dt.datetime | None = None):
+        """Context manager for explicit database transactions.
+
+        Args:
+            input_date: If provided, all history entries written within this
+                transaction use this timestamp for their validity range instead
+                of now(). The actual wall-clock time is always recorded in
+                history.recorded_at for auditability. Requires a timezone-aware
+                datetime. The timestamp must be strictly after the validity
+                start of any existing open history entry being modified.
+        """
+        if input_date is None:
+            return self._conn.transaction()
+        if not isinstance(input_date, dt.datetime) or input_date.tzinfo is None:
+            raise ValueError("input_date requires a timezone-aware datetime")
+        return self._transaction_with_input_date(input_date)
+
+    @asynccontextmanager
+    async def _transaction_with_input_date(self, ts: dt.datetime):
+        key = f"{self._schema}.input_date"
+        async with self._conn.transaction():
+            prev = (await self._conn.query(
+                "SELECT current_setting(%(k)s, true) AS v", k=key
+            ))[0]['v'] or ''
+            await self._conn.execute(
+                "SELECT set_config(%(k)s, %(v)s, true)", k=key, v=ts.isoformat()
+            )
+            try:
+                yield
+            finally:
+                try:
+                    await self._conn.execute(
+                        "SELECT set_config(%(k)s, %(v)s, true)", k=key, v=prev
+                    )
+                except Exception:
+                    pass  # Transaction failed; rollback reverts SET LOCAL automatically
 
     ####################################################################################
     # Internal Methods
@@ -204,6 +239,8 @@ class Graph:
         self.registry[obj.id] = obj
         if hasattr(obj, 'type') and obj.type:
             self.registry_type[obj.type][obj.id] = obj
+        if hasattr(obj, 'subtype') and obj.subtype:
+            self.registry_subtype[obj.subtype][obj.id] = obj
         obj._update_indexes()
 
         return obj.id
@@ -252,6 +289,8 @@ class Graph:
             self.registry[obj.id] = obj
             if hasattr(obj, 'type') and obj.type:
                 self.registry_type[obj.type][obj.id] = obj
+            if hasattr(obj, 'subtype') and obj.subtype:
+                self.registry_subtype[obj.subtype][obj.id] = obj
             obj._update_indexes()
             obj._clear_all_unsaved_backlinks()
             obj._convert_backlink_refs_to_ids()
@@ -353,6 +392,8 @@ class Graph:
         self.registry.pop(obj.id, None)
         if hasattr(obj, 'type') and obj.type:
             self.registry_type[obj.type].pop(obj.id, None)
+        if hasattr(obj, 'subtype') and obj.subtype:
+            self.registry_subtype[obj.subtype].pop(obj.id, None)
 
         obj.id = None
         return True

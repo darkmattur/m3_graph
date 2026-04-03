@@ -62,6 +62,19 @@ AS $$
 $$;
 
 
+-- Helper: return the effective timestamp for history entries.
+-- Uses the session-local input_date setting if set, otherwise now().
+CREATE OR REPLACE FUNCTION {name}._effective_ts()
+RETURNS timestamptz
+LANGUAGE sql STABLE
+AS $$
+  SELECT COALESCE(
+    nullif(current_setting('{name}.input_date', true), '')::timestamptz,
+    now()
+  );
+$$;
+
+
 -------------------------------------------------------------------------------
 -- INSERT trigger (statement-level, transition table)
 -------------------------------------------------------------------------------
@@ -132,9 +145,10 @@ BEGIN
   FROM grouped g
   WHERE tgt.id = g.target_id;
 
-  -- History: bulk insert
-  INSERT INTO {name}.history (id, category, type, subtype, attr, deleted, source)
-  SELECT n.id, n.category, n.type, n.subtype, n.attr, false, n.source
+  -- History: bulk insert with effective timestamp
+  INSERT INTO {name}.history (id, validity, category, type, subtype, attr, deleted, source)
+  SELECT n.id, tstzrange({name}._effective_ts(), 'infinity', '(]'),
+         n.category, n.type, n.subtype, n.attr, false, n.source
   FROM new_rows n;
 
   RETURN NULL;
@@ -284,10 +298,28 @@ BEGIN
   FROM to_add a
   WHERE tgt.id = a.target_id;
 
+  -- History: validate that effective timestamp is after the start of current validity
+  PERFORM 1
+  FROM {name}.history h
+  JOIN new_rows n ON h.id = n.id
+  JOIN old_rows o ON o.id = n.id
+  WHERE upper(h.validity) = 'infinity'
+    AND {name}._effective_ts() <= lower(h.validity)
+    AND (o.category IS DISTINCT FROM n.category
+      OR o.type     IS DISTINCT FROM n.type
+      OR o.subtype  IS DISTINCT FROM n.subtype
+      OR NOT (o.attr @> n.attr AND n.attr @> o.attr));
+
+  IF FOUND THEN
+    RAISE EXCEPTION 'input_date (%%) must be strictly after the validity start of the current history entry',
+      {name}._effective_ts()
+      USING ERRCODE = 'check_violation';
+  END IF;
+
   -- History: close old periods then open new ones (two statements because
   -- the temporal PK constraint needs to see the closed rows before inserting)
   UPDATE {name}.history h
-  SET validity = tstzrange(lower(h.validity), now(), '(]')
+  SET validity = tstzrange(lower(h.validity), {name}._effective_ts(), '(]')
   FROM new_rows n
   JOIN old_rows o ON o.id = n.id
   WHERE h.id = n.id
@@ -298,7 +330,7 @@ BEGIN
       OR NOT (o.attr @> n.attr AND n.attr @> o.attr));
 
   INSERT INTO {name}.history (id, validity, category, type, subtype, attr, deleted, source)
-  SELECT n.id, tstzrange(now(), 'infinity', '(]'), n.category, n.type, n.subtype, n.attr, false, n.source
+  SELECT n.id, tstzrange({name}._effective_ts(), 'infinity', '(]'), n.category, n.type, n.subtype, n.attr, false, n.source
   FROM new_rows n
   JOIN old_rows o ON o.id = n.id
   WHERE o.category IS DISTINCT FROM n.category
@@ -385,9 +417,22 @@ BEGIN
   FROM grouped g
   WHERE tgt.id = g.target_id;
 
+  -- History: validate that effective timestamp is after the start of current validity
+  PERFORM 1
+  FROM {name}.history h
+  JOIN old_rows o ON h.id = o.id
+  WHERE upper(h.validity) = 'infinity'
+    AND {name}._effective_ts() <= lower(h.validity);
+
+  IF FOUND THEN
+    RAISE EXCEPTION 'input_date (%%) must be strictly after the validity start of the current history entry',
+      {name}._effective_ts()
+      USING ERRCODE = 'check_violation';
+  END IF;
+
   -- History: close validity periods
   UPDATE {name}.history h
-  SET validity = tstzrange(lower(h.validity), now(), '(]')
+  SET validity = tstzrange(lower(h.validity), {name}._effective_ts(), '(]')
   FROM old_rows o
   WHERE h.id = o.id AND upper(h.validity) = 'infinity';
 
