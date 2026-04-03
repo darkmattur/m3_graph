@@ -146,6 +146,8 @@ class DBObject(BaseModel):
             self.graph.registry[self.id] = self
             if hasattr(self, 'type') and self.type:
                 self.graph.registry_type[self.type][self.id] = self
+            if hasattr(self, 'subtype') and self.subtype:
+                self.graph.registry_subtype[self.subtype][self.id] = self
             self._update_indexes()
 
     def __setattr__(self, name: str, value):
@@ -559,8 +561,7 @@ class DBObject(BaseModel):
         if not hasattr(cls, 'type') or cls.type is None:
             return []
 
-        objects = cls.graph.registry_type.get(cls.type, {}).values()
-        return [obj for obj in objects if isinstance(obj, cls)]
+        return list(cls.graph.registry_subtype.get(cls.subtype, {}).values())
 
     @classmethod
     def find(cls, **kwargs):

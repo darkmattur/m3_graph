@@ -1,4 +1,5 @@
-import os, asyncio
+import os, asyncio, datetime as dt
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from collections import defaultdict
@@ -88,6 +89,7 @@ class Graph:
         # Object registries
         self.registry = dict()
         self.registry_type = defaultdict(dict)
+        self.registry_subtype = defaultdict(dict)
 
         # Set graph instance on DBObject base class so all subclasses can access it
         self.DBObject.graph = self
@@ -353,6 +355,8 @@ class Graph:
         self.registry.pop(obj.id, None)
         if hasattr(obj, 'type') and obj.type:
             self.registry_type[obj.type].pop(obj.id, None)
+        if hasattr(obj, 'subtype') and obj.subtype:
+            self.registry_subtype[obj.subtype].pop(obj.id, None)
 
         obj.id = None
         return True
