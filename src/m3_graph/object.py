@@ -384,12 +384,12 @@ class DBObject(BaseModel):
         cls._computed_indexes = {}
 
         # Collect constraints from inheritance chain.
-        # If a class explicitly defines a constraint attr, use it directly
-        # (even if empty) to respect overrides like Token.type_unique_attr = [].
-        # Otherwise, accumulate from the MRO.
+        # If a class explicitly sets a constraint attr to [] (empty), it means
+        # "clear inherited constraints" (e.g. Token.type_unique_attr = []).
+        # A non-empty explicit value is additive with the MRO as before.
         def _collect_constraints(attr_name):
-            if attr_name in cls.__dict__:
-                return list(getattr(cls, attr_name))
+            if attr_name in cls.__dict__ and not getattr(cls, attr_name):
+                return []
             return list({c for base in reversed(cls.__mro__)
                 if hasattr(base, attr_name) for c in getattr(base, attr_name)})
 
