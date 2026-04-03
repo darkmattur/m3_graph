@@ -20,6 +20,7 @@ CREATE INDEX IF NOT EXISTS idx_object_attr_gin ON {name}.object USING gin (attr)
 CREATE TABLE IF NOT EXISTS {name}.history (
   id          BIGINT NOT NULL,
   validity    TSTZRANGE DEFAULT tstzrange(now(), 'infinity', '(]'),
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   changed_by  TEXT DEFAULT current_user,
   category    TEXT NOT NULL,
   type        TEXT NOT NULL,
@@ -30,8 +31,12 @@ CREATE TABLE IF NOT EXISTS {name}.history (
   PRIMARY KEY (id, validity WITHOUT OVERLAPS)
 );
 
+-- Migration: add recorded_at for existing history tables
+ALTER TABLE {name}.history ADD COLUMN IF NOT EXISTS recorded_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
 CREATE INDEX IF NOT EXISTS idx_history_attr_gin ON {name}.history USING gin (attr);
 CREATE INDEX IF NOT EXISTS idx_history_deleted ON {name}.history (deleted);
+CREATE INDEX IF NOT EXISTS idx_history_recorded_at ON {name}.history (recorded_at);
 
 -- Type metadata (relationships and inheritance)
 

@@ -157,9 +157,12 @@ class Graph:
             try:
                 yield
             finally:
-                await self._conn.execute(
-                    "SELECT set_config(%(k)s, %(v)s, true)", k=key, v=prev
-                )
+                try:
+                    await self._conn.execute(
+                        "SELECT set_config(%(k)s, %(v)s, true)", k=key, v=prev
+                    )
+                except Exception:
+                    pass  # Transaction failed; rollback reverts SET LOCAL automatically
 
     ####################################################################################
     # Internal Methods
